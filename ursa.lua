@@ -188,7 +188,7 @@ function ursa.rule(param)
   end
 end
 
-ursa.command_default = {} -- opaque unique token
+local command_default = {} -- opaque unique token
 
 function ursa.command(param)
   local destination, dependencies, activity = unpack(param)
@@ -211,7 +211,7 @@ end
 function ursa.build(param)
   print("build", param)
   if #param == 0 then
-    param = {ursa.command_default}
+    param = {command_default}
   end
   
   for _, v in ipairs(param) do
@@ -228,3 +228,19 @@ function ursa.build(param)
   fil:write(pluto.persist({}, built_signatures))
   fil:close()
 end
+
+for k, v in pairs(ursa) do
+  if type(v) == "function" then
+    ursa[k] = function (block, ...)
+      assert(select('#', ...) == 0)
+      return v(block)
+    end
+  end
+end
+
+local uc = ursa.command
+ursa.command = setmetatable({
+  default = command_default,
+}, {
+  __call = function(_, ...) return uc(...) end
+})

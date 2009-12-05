@@ -12,7 +12,7 @@ ursa.rule{"hello.o", "hello.cpp", "g++ -o hello.o -c hello.cpp"}
 ursa.rule{"hello.exe", "hello.o", "g++ -o hello hello.o"}
 
 -- Define a pair of commands that can be triggered as build targets
-ursa.command{ursa.command_default, "hello.exe"}
+ursa.command{ursa.command.default, "hello.exe"}
 ursa.command{"run", "hello.exe", "./hello.exe"}
 --[[
 "ursa.command.default" is an opaque token that specifies a default
