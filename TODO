@@ -1,0 +1,21 @@
+- fix this weird bug causing it to lock up?
+- detect bad builds
+- detect failure to output file
+- wipe bad output
+
+
+ursa.rule{{set_of_things}, {set_of_things}, command-or-function}
+a thing is either a filename or a function. if it's a function, the function's tostring'ed return value is used as its signature.
+
+ursa.command{"name", {set_of_things}, command-or-function}
+
+ursa.token{"name", dependencies, definition}
+ursa.value{"name"}
+
+ursa.embed{"file", "path"}
+ursa.embed{"full filename"}
+
+ursa.build{...}
+  
+  
+ursa.util.

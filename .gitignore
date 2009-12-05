@@ -1,0 +1,3 @@
+examples/*/*.o
+examples/*/*.exe
+examples/*/.ursa.cache

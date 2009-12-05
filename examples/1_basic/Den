@@ -1,0 +1,24 @@
+#! /usr/local/bin/lua
+-- Denfile for Hello World 0.1
+
+-- Import the Ursa library
+require "luarocks.loader"
+require "ursa"
+
+-- Define a rule to build "hello.o"
+ursa.rule{"hello.o", "hello.cpp", "g++ -o hello.o -c hello.cpp"}
+
+-- Define a rule to build "hello"
+ursa.rule{"hello.exe", "hello.o", "g++ -o hello hello.o"}
+
+-- Define a pair of commands that can be triggered as build targets
+ursa.command{ursa.command_default, "hello.exe"}
+ursa.command{"run", "hello.exe", "./hello.exe"}
+--[[
+"ursa.command.default" is an opaque token that specifies a default
+command when Ursa is run without a parameter. The third parameter
+of "command" is run after the build is complete.
+]]
+ 
+-- Start the actual build process
+ursa.build{...}
