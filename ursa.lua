@@ -2,6 +2,10 @@
 require "luarocks.loader"
 require "md5"
 require "pluto"
+require "ursalib"
+
+local ul = ursalib
+ursalib = nil
 
 local print_raw = print
 
@@ -82,7 +86,13 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       --print("Activity on", sig, activity)
       if type(activity) == "string" then
         print_raw(activity)
-        os.execute(activity)
+        local rv = os.execute(activity)
+        if rv ~= 0 then
+          for k in pairs(destfiles) do
+            ul.unlink(k)
+          end
+          assert(false)
+        end
       elseif type(activity) == "function" then
         activity()
       elseif activity == nil then

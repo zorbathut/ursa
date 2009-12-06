@@ -12,13 +12,14 @@ description = {
 dependencies = {
   "lua >= 5.1",
   "pluto >= 2.2",
-  "lpc >= 1.0.0",
   "md5 >= 1.1.0",
 }
 build = {
   type = "builtin",
   
   modules = {
-    ursa = "ursa.lua"
+    ursa = "ursa.lua",
+    
+    ursalib = "ursalib.c",
   },
 }

@@ -1,3 +1,5 @@
 examples/*/*.o
 examples/*/*.exe
 examples/*/.ursa*
+ursalib.o
+ursalib.so
