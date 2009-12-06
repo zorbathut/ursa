@@ -15,27 +15,31 @@ local commands = {}
 ursa = {}
 ursa.util = {}
 
-local built_signatures = {}   -- no sig storage yet
-do
-  local cache = io.open(".ursa.cache", "rb")
-  if cache then
-    local dat = cache:read("*a")
-    cache:close()
-    built_signatures = pluto.unpersist({}, dat)
-  end
+local function md5_file(filename)
+  local file = io.open(filename, "rb")
+  if not file then return "" end
+  local dat = file:read("*a")
+  file:close()
+  return md5.sum(dat)
 end
 
-local function md5_file(filename)
-  --print("ma")
-  local file = io.open(filename, "rb")
-  --print("mb")
-  if not file then return "" end
-  --print("mc")
-  local dat = file:read("*a")
-  --print("md")
-  file:close()
-  --print("me")
-  return md5.sum(dat)
+local built_signatures = {}   -- no sig storage yet
+do
+  local uc_cs = io.open(".ursa.cache.checksum", "rb")
+  local cache = io.open(".ursa.cache", "rb")
+  if uc_cs and cache then
+    local cs = uc_cs:read("*a")
+    if md5_file(".ursa.cache") == cs then
+      local dat = cache:read("*a")
+      print("DECACHING")
+      built_signatures = pluto.unpersist({}, dat)
+    else
+      print("Corrupted cache?")
+    end
+  end
+  
+  if uc_cs then uc_cs:close() end
+  if cache then cache:close() end
 end
 
 local function make_node(sig, destfiles, dependencies, activity, flags)
@@ -55,8 +59,6 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       for k in pairs(dependencies) do
         files[k]:wake()
       end
-      
-      --print("working on ", sig)
       
       if not flags.always_rebuild and self:signature() == built_signatures[sig] then
         self.state = "finished"
@@ -90,16 +92,12 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       
       self.state = "finished"
       
-      print("bsig")
       built_signatures[sig] = self:signature()
-      print("dsig")
-      print("Set sig", sig, built_signatures[sig])
     end
     
     assert(self.state == "finished")
   end
   function Node:signature()  -- what is your signature?
-    --print("startsig")
     if self.sig then return self.sig end
     
     --print("a")
@@ -115,10 +113,8 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     for k in pairs(dependencies) do
       table.insert(sch, files[k]:signature())
     end
-    --print("d")
     self.sig = md5.sum(table.concat(sch, "\0"))
     
-    --print("endsig")
     return self.sig
   end
   
@@ -130,8 +126,9 @@ local function make_raw_file(file)
   
   function Node:wake()
     if not self.sig then
-    print(file)
-      self.sig = md5.sum(md5.sum(file) .. md5_file(file))
+      local fil = md5_file(file)
+      assert(fil ~= "")
+      self.sig = md5.sum(md5.sum(file) .. fil)
     end
   end
   Node.block = Node.wake
@@ -148,7 +145,7 @@ local function recrunch(list, item)
     list[item] = true
   elseif type(item) == "table" then
     for _, v in ipairs(item) do
-      recrunch_output(v)
+      recrunch(list, v)
     end
   elseif item == nil then
   else
@@ -183,7 +180,6 @@ function ursa.rule(param)
   local node = make_node(destination, ofilelist, ifilelist, activity)
   for k in pairs(ofilelist) do
     assert(not files[k]) -- we already tried this
-    print("Adding node", k)
     files[k] = node
   end
 end
@@ -209,7 +205,6 @@ function ursa.command(param)
 end
 
 function ursa.build(param)
-  print("build", param)
   if #param == 0 then
     param = {command_default}
   end
@@ -227,6 +222,11 @@ function ursa.build(param)
   local fil = io.open(".ursa.cache", "wb")
   fil:write(pluto.persist({}, built_signatures))
   fil:close()
+  
+  local cs = md5_file(".ursa.cache")
+  local filcs = io.open(".ursa.cache.checksum", "wb")
+  filcs:write(cs)
+  filcs:close()
 end
 
 for k, v in pairs(ursa) do

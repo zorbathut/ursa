@@ -1,0 +1,23 @@
+#! /usr/local/bin/lua
+-- Denfile for Hello World 1.4
+
+-- Import the Ursa library
+require "luarocks.loader"
+require "ursa"
+
+-- List our source files
+local sources = {"main", "ui", "debug", "log", "driver_vga", "driver_console", "driver_x"}
+
+-- Build object files
+local objects = {}
+for _, file in ipairs(sources) do
+  ursa.rule{file .. ".o", file .. ".cpp", ("g++ -o %s.o -c %s.cpp"):format(file, file)}
+  table.insert(objects, file .. ".o")
+end
+ 
+ursa.rule{"hello.exe", objects, "g++ -o hello.exe ".. table.concat(objects, " ")}
+ 
+ursa.command{ursa.command.default, "hello.exe"}
+ursa.command{"run", "hello.exe", "./hello.exe"}
+
+ursa.build{...}
