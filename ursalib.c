@@ -10,27 +10,27 @@ static int ursalib_system(lua_State *L) {
   luaL_buffinit(L, &b);
   
   while(1) {
-    char buff[4096];
-    int siz = fread(buff, 1, sizeof(buff), fil);
-    luaL_addlstring(&b, buff, siz);
-    if(siz != sizeof(buff))
+    char *buff = luaL_prepbuffer(&b);
+    int siz = fread(buff, 1, LUAL_BUFFERSIZE, fil);
+    luaL_addsize(&b, siz);
+    if(siz != LUAL_BUFFERSIZE)
       break;
   }
   
-  lua_pushinteger(L, pclose(fil));
   luaL_pushresult(&b);
+  lua_pushinteger(L, pclose(fil));
 
   return 2;
 }
 
-LUALIB_API int luaopen_ursalib(lua_State *L)
+LUALIB_API int luaopen_ursalibc(lua_State *L)
 {
   const luaL_reg ursil[] = {
     {"system", ursalib_system},
     {NULL, NULL}
   };
 
-  luaL_register(L, "ursalib", ursil);
+  luaL_register(L, "ursalibc", ursil);
 
   return 0;
 }

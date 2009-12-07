@@ -1,0 +1,26 @@
+#! /usr/local/bin/lua
+-- Denfile for Hello World 1.4
+
+-- Import the Ursa library
+require "luarocks.loader"
+require "ursa"
+
+-- Hello World now depends on libpng
+ursa.token{"libpng_cflags", nil, "pkg-config libpng --cflags"}
+ursa.token{"libpng_linkflags", nil, "pkg-config libpng --libs"}
+
+local sources = {"main", "ui", "debug", "log", "driver_vga", "driver_console", "driver_x"}
+
+local objects = {}
+for _, file in ipairs(sources) do
+  ursa.rule{file .. ".o", file .. ".cpp", ("g++ -o %s.o -c %s.cpp %s"):format(file, file, ursa.value{"libpng_cflags"})}
+  table.insert(objects, file .. ".o")
+end
+ 
+ursa.rule{"hello.exe", objects, ("g++ -o hello.exe %s %s"):format(table.concat(objects, " "), ursa.value{"libpng_linkflags"})}
+ 
+ursa.command{ursa.command.default, "hello.exe"}
+ursa.command{"run", "hello.exe", "./hello.exe"}
+
+ursa.build{...}
+

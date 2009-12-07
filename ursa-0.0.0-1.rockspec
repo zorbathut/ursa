@@ -11,7 +11,6 @@ description = {
 }
 dependencies = {
   "lua >= 5.1",
-  "pluto >= 2.2",
   "md5 >= 1.1.0",
 }
 build = {
@@ -20,6 +19,8 @@ build = {
   modules = {
     ursa = "ursa.lua",
     
-    ursalib = "ursalib.c",
+    ursaliblua = "ursaliblua.lua",
+    
+    ursalibc = "ursalib.c",
   },
 }

@@ -1,11 +1,14 @@
 
 require "luarocks.loader"
 require "md5"
-require "pluto"
-require "ursalib"
+require "ursalibc"
+require "ursaliblua"
 
-local ul = ursalib
-ursalib = nil
+local ul = {}
+for k, v in pairs(ursalibc) do ul[k] = v end
+for k, v in pairs(ursaliblua) do ul[k] = v end
+ursalibc = nil
+ursaliblua = nil
 
 local print_raw = print
 
@@ -19,24 +22,31 @@ local commands = {}
 ursa = {}
 ursa.util = {}
 
-local function md5_file(filename)
+local function md5_file(filename, hexa)
+  collectgarbage("collect")
   local file = io.open(filename, "rb")
   if not file then return "" end
+  file:read("*a")
   local dat = file:read("*a")
   file:close()
-  return md5.sum(dat)
+  return hexa and md5.sumhexa(dat) or md5.sum(dat)
 end
 
 local built_signatures = {}   -- no sig storage yet
+local built_tokens = {}
+local serial_v = 1
 do
   local uc_cs = io.open(".ursa.cache.checksum", "rb")
   local cache = io.open(".ursa.cache", "rb")
   if uc_cs and cache then
     local cs = uc_cs:read("*a")
-    if md5_file(".ursa.cache") == cs then
+    if md5_file(".ursa.cache", true) == cs then
       local dat = cache:read("*a")
-      print("DECACHING")
-      built_signatures = pluto.unpersist({}, dat)
+      local pv, bs, bt
+      sv, bs, bt = unpack(ul.persistence.load(dat))
+      if sv == serial_v then
+        built_signatures, built_tokens = bs, bt
+      end
     else
       print("Corrupted cache?")
     end
@@ -55,6 +65,21 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   --  The signatures of everything I depend on, sorted in alphabetical order: if these change, I have to be updated
   -- We also have to store implicit dependencies for nodes, but these get thrown away if the node gets rebuilt
   local Node = {}
+  
+  local realfiles = {}
+  local tokens = {}
+  local tokcount = 0
+  local tokit = nil
+  for k in pairs(destfiles) do
+    if k:sub(1, 1) ~= "#" then
+      realfiles[k] = true
+    else
+      tokens[k:sub(2)] = true
+      tokcount = tokcount + 1
+      tokit = k:sub(2)
+    end
+  end
+  assert(tokcount < 2)
 
   Node.state = "asleep"
   function Node:wake()  -- wake up, I'm gonna need you. get yourself ready to be processed and start crunching
@@ -83,21 +108,51 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         files[k]:block()
       end
       
-      --print("Activity on", sig, activity)
-      if type(activity) == "string" then
-        print_raw(activity)
-        local rv = os.execute(activity)
-        if rv ~= 0 then
-          for k in pairs(destfiles) do
-            os.remove(k)
-          end
-          assert(false)
+      if not flags.token then
+        for k in pairs(realfiles) do
+          os.remove(k)
         end
-      elseif type(activity) == "function" then
-        activity()
-      elseif activity == nil then
+        
+        --print("Activity on", sig, activity)
+        if type(activity) == "string" then
+          print_raw(activity)
+          local rv = os.execute(activity)
+          if rv ~= 0 then
+            for k in pairs(destfiles) do
+              os.remove(k)
+            end
+            assert(false)
+          end
+        elseif type(activity) == "function" then
+          activity()
+        elseif activity == nil then
+        else
+          assert(false) -- whups
+        end
+        
+        -- make sure all the files were generated
+        for k in pairs(destfiles) do
+          if k:sub(1, 1) ~= "#" then
+            local check = io.open(k, "r")
+            assert(check)
+            check:close()
+          end
+        end
       else
-        assert(false) -- whups
+        -- token
+        assert(tokit)
+        built_tokens[tokit] = nil
+        
+        if type(activity) == "string" then
+          print_raw(activity)
+          built_tokens[tokit] = ursa.util.system(activity)
+        elseif type(activity) == "function" then
+          built_tokens[tokit] = activity()
+        else
+          assert(false) -- whups
+        end
+        
+        assert(built_tokens[tokit])
       end
       
       self.state = "finished"
@@ -110,16 +165,11 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   function Node:signature()  -- what is your signature?
     if self.sig then return self.sig end
     
-    --print("a")
     local sch = {}
     for k in pairs(destfiles) do
-      --print("md5f", k)
       table.insert(sch, md5_file(k))
-      --print("md5fe")
     end
-    --print("b")
     table.insert(sch, md5.sum(activity or ""))  -- "" is pretty much equivalent
-    --print("c")
     for k in pairs(dependencies) do
       table.insert(sch, files[k]:signature())
     end
@@ -132,6 +182,8 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
 end
 
 local function make_raw_file(file)
+  assert(file:sub(1, 1) ~= "#") -- not a token wannabe
+
   local Node = {}
   
   function Node:wake()
@@ -194,6 +246,36 @@ function ursa.rule(param)
   end
 end
 
+function ursa.token(param)
+  local destination, dependencies, activity = unpack(param)
+  print("Making token:", destination, dependencies, activity)
+  
+  local ifilelist = {}
+  
+  recrunch(ifilelist, dependencies)
+  
+  for k in pairs(ifilelist) do
+    assert(not ofilelist[k])
+    if not files[k] then
+      files[k] = make_raw_file(k)
+    end
+  end
+  
+  local node = make_node("#" .. destination, {["#" .. destination] = true}, ifilelist, activity, {token = true})
+  
+  assert(not files["#" .. destination]) -- we already tried this
+  files["#" .. destination] = node
+end
+function ursa.value(param)
+  local tok = unpack(param)
+  assert(files["#" .. tok])
+  
+  files["#" .. tok]:block()
+  assert(built_tokens[tok])
+  
+  return built_tokens[tok]
+end
+
 local command_default = {} -- opaque unique token
 
 function ursa.command(param)
@@ -223,17 +305,14 @@ function ursa.build(param)
     assert(commands[v], v)
     commands[v]:wake()
   end
-  
   for _, v in ipairs(param) do
     assert(commands[v])
     commands[v]:block()
   end
   
-  local fil = io.open(".ursa.cache", "wb")
-  fil:write(pluto.persist({}, built_signatures))
-  fil:close()
+  ul.persistence.save(".ursa.cache", {serial_v, built_signatures, built_tokens})
   
-  local cs = md5_file(".ursa.cache")
+  local cs = md5_file(".ursa.cache", true)
   local filcs = io.open(".ursa.cache.checksum", "wb")
   filcs:write(cs)
   filcs:close()
@@ -260,7 +339,8 @@ ursa.command = setmetatable({
 
 
 function ursa.util.system(chunk)
-  local rv, str = ul.system(chunk)
+  do return "" end
+  local str, rv = ul.system(chunk)
   assert(rv == 0)
   return str
 end
