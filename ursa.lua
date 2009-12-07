@@ -89,7 +89,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         local rv = os.execute(activity)
         if rv ~= 0 then
           for k in pairs(destfiles) do
-            ul.unlink(k)
+            os.remove(k)
           end
           assert(false)
         end
@@ -239,14 +239,17 @@ function ursa.build(param)
   filcs:close()
 end
 
-for k, v in pairs(ursa) do
-  if type(v) == "function" then
-    ursa[k] = function (block, ...)
-      assert(select('#', ...) == 0)
-      return v(block)
+local function wrap_funcs(chunk)
+  for k, v in pairs(chunk) do
+    if type(v) == "function" then
+      ursa[k] = function (block, ...)
+        assert(select('#', ...) == 0)
+        return v(block)
+      end
     end
   end
 end
+wrap_funcs(ursa)
 
 local uc = ursa.command
 ursa.command = setmetatable({
@@ -254,3 +257,12 @@ ursa.command = setmetatable({
 }, {
   __call = function(_, ...) return uc(...) end
 })
+
+
+function ursa.util.system(chunk)
+  local rv, str = ul.system(chunk)
+  assert(rv == 0)
+  return str
+end
+
+wrap_funcs(ursa.util)
