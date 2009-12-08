@@ -32,11 +32,14 @@ local function md5_file(filename, hexa)
   local file = io.open(filename, "rb")
   if not file then return "" end
   local dat = file:read("*a")
+  assert(dat, filename, #filename)
   file:close()
   local rv = hexa and md5.sumhexa(dat) or md5.sum(dat)
   --garbaj()
   return rv
 end
+
+local paths_made = {}
 
 local built_signatures = {}   -- no sig storage yet
 local built_tokens = {}
@@ -69,11 +72,17 @@ local function make_raw_file(file)
   local Node = {}
   
   function Node:wake()
+    print("rwak a")
     if not self.sig then
+      print("rwak b")
       local fil = md5_file(file, true)
-      assert(fil ~= "")
+      print("rwak c")
+      assert(fil ~= "", file)
+      print("rwak d")
       self.sig = md5.sum(md5.sum(file) .. fil)
+      print("rwak e")
     end
+    print("rwak f")
   end
   Node.block = Node.wake
   function Node:signature()
@@ -146,19 +155,25 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
 
   Node.state = "asleep"
   function Node:wake()  -- wake up, I'm gonna need you. get yourself ready to be processed and start crunching
+    print("wi a")
     if self.state == "asleep" then
       self.state = "working"
       
+      print("wi b")
       for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
+        print("wi c")
         files[k]:wake()
+        print("wi d")
       end
-      
+      print("wi e")
       if not flags.always_rebuild and self:signature() == built_signatures[sig] then
         self.state = "finished"
       else
         -- add self to production queue
       end
+      print("wi f")
     end
+    print("wi g")
   end
   function Node:block()  -- please return once you're done and yield/grind until then
     if self.state == "asleep" then
@@ -175,6 +190,13 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       if not flags.token then
         for k in pairs(realfiles) do
           os.remove(k)
+          local path = k:match("(.*)/[^/]+")
+          if path and not paths_made[path] then
+            local cmd = "mkdir -p -v " .. path
+            print_raw(cmd)
+            os.execute(cmd)
+            paths_made[path] = true
+          end
         end
         
         --print("Activity on", sig, activity)
@@ -325,25 +347,40 @@ function ursa.command(param)
 end
 
 function ursa.build(param)
+print("sb")
   if #param == 0 then
     param = {command_default}
   end
   
-  for _, v in ipairs(param) do
-    assert(commands[v], v)
-    commands[v]:wake()
-  end
-  for _, v in ipairs(param) do
-    assert(commands[v])
-    commands[v]:block()
-  end
+  local status, rv = pcall(function ()
+    print("ip")
+    for _, v in ipairs(param) do
+      assert(commands[v], v)
+      print("wakein")
+      commands[v]:wake()
+      print("wakeout")
+    end
+    for _, v in ipairs(param) do
+      assert(commands[v])
+      print("blockin")
+      commands[v]:block()
+      print("blockout")
+    end
+    print("ip done")
+  end)
   
+  print("sav")
   ul.persistence.save(".ursa.cache", {serial_v, built_signatures, built_tokens})
   
   local cs = md5_file(".ursa.cache", true)
   local filcs = io.open(".ursa.cache.checksum", "wb")
   filcs:write(cs)
   filcs:close()
+  
+  if not status then
+    print(rv)
+    os.exit(1)
+  end
 end
 
 local function wrap_funcs(chunk)
@@ -370,6 +407,8 @@ function ursa.util.system(chunk)
   print_raw(chunk)
   local str, rv = ul.system(chunk)
   assert(rv == 0)
+  str = str:match("^%s*(.-)%s*$")
+  assert(str)
   return str
 end
 
