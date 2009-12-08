@@ -1,0 +1,39 @@
+#! /usr/local/bin/lua
+-- Denfile for Hello World 2.0
+
+-- Import the Ursa library
+require "luarocks.loader"
+require "ursa"
+
+local sources = {"main", "ui", "log"}
+
+-- Parse the result from g++'s built-in dependency scanner
+local function make_dependencies(srcfile)
+  local deps = ursa.util.system(("g++ -MM %s"):format(srcfile))
+  deps = deps:match("^.*: (.*)$")
+  
+  local dependencies = {}
+  for file in deps:gmatch("([^ \n\t]+)") do
+    table.insert(dependencies, file)
+  end
+  
+  return dependencies
+end
+
+local objects = {}
+for _, file in ipairs(sources) do
+  local cpp = file .. ".cpp"
+  local o = file .. ".o"
+  local depend = file .. " dependencies"
+  
+  ursa.token{depend, ursa.util.value_deferred{depend, default = cpp}, function () return make_dependencies(cpp) end}
+  ursa.rule{o, ursa.util.value_deferred{depend}, ("g++ -o %s.o -c %s.cpp"):format(file, file)}
+  table.insert(objects, o)
+end
+ 
+ursa.rule{"hello.exe", objects, ("g++ -o hello.exe %s"):format(table.concat(objects, " "))}
+ 
+ursa.command{ursa.command.default, "hello.exe"}
+ursa.command{"run", "hello.exe", "./hello.exe"}
+
+ursa.build{...}

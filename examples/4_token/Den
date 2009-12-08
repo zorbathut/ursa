@@ -21,6 +21,7 @@ ursa.rule{"hello.exe", objects, ("g++ -o hello.exe %s %s"):format(table.concat(o
  
 ursa.command{ursa.command.default, "hello.exe"}
 ursa.command{"run", "hello.exe", "./hello.exe"}
+ursa.command{"clean", ursa.util.clean}
 
 ursa.build{...}
 

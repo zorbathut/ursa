@@ -16,6 +16,12 @@ local function print(...)
   print_raw("ursadbg", ...)
 end
 
+local function garbaj()
+  print("testing garbaj")
+  collectgarbage("collect")
+  print("testing garbaj complete")
+end
+
 local files = {}
 local commands = {}
 
@@ -23,13 +29,13 @@ ursa = {}
 ursa.util = {}
 
 local function md5_file(filename, hexa)
-  collectgarbage("collect")
   local file = io.open(filename, "rb")
   if not file then return "" end
-  file:read("*a")
   local dat = file:read("*a")
   file:close()
-  return hexa and md5.sumhexa(dat) or md5.sum(dat)
+  local rv = hexa and md5.sumhexa(dat) or md5.sum(dat)
+  --garbaj()
+  return rv
 end
 
 local built_signatures = {}   -- no sig storage yet
@@ -54,6 +60,63 @@ do
   
   if uc_cs then uc_cs:close() end
   if cache then cache:close() end
+end
+
+
+local function make_raw_file(file)
+  assert(file:sub(1, 1) ~= "#") -- not a token wannabe
+
+  local Node = {}
+  
+  function Node:wake()
+    if not self.sig then
+      local fil = md5_file(file, true)
+      assert(fil ~= "")
+      self.sig = md5.sum(md5.sum(file) .. fil)
+    end
+  end
+  Node.block = Node.wake
+  function Node:signature()
+    self:wake()
+    return self.sig
+  end
+  
+  return Node
+end
+
+local function recrunch(list, item, resolve_functions)
+  if type(item) == "string" then
+    list[item] = true
+  elseif type(item) == "table" then
+    local ipct = 0
+    for _, v in ipairs(item) do
+      recrunch(list, v)
+      ipct = ipct + 1
+    end
+    for _, v in pairs(item) do
+      ipct = ipct - 1
+    end
+    assert(ipct == 0)
+  elseif type(item) == "function" then
+    if resolve_functions then
+      recrunch(list, item())
+    end
+  elseif item == nil then
+  else
+    assert(false)
+  end
+end
+
+local function distill_dependencies(dependencies, ofilelist, resolve_functions)
+  local ifilelist = {}
+  recrunch(ifilelist, dependencies, resolve_functions)
+  for k in pairs(ifilelist) do
+    assert(not ofilelist or not ofilelist[k])
+    if not files[k] then
+      files[k] = make_raw_file(k)
+    end
+  end
+  return ifilelist
 end
 
 local function make_node(sig, destfiles, dependencies, activity, flags)
@@ -85,7 +148,8 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   function Node:wake()  -- wake up, I'm gonna need you. get yourself ready to be processed and start crunching
     if self.state == "asleep" then
       self.state = "working"
-      for k in pairs(dependencies) do
+      
+      for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
         files[k]:wake()
       end
       
@@ -103,7 +167,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     
     if self.state == "working" then
       --print("Blocking on ", sig)
-      for k in pairs(dependencies) do
+      for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
         self.sig = nil
         files[k]:block()
       end
@@ -157,7 +221,9 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       
       self.state = "finished"
       
-      built_signatures[sig] = self:signature()
+      if not flags.no_save then
+        built_signatures[sig] = self:signature()
+      end
     end
     
     assert(self.state == "finished")
@@ -166,13 +232,26 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     if self.sig then return self.sig end
     
     local sch = {}
-    for k in pairs(destfiles) do
-      table.insert(sch, md5_file(k))
+    if flags.token then
+      table.insert(sch, md5.sum(ul.persistence.dump(built_tokens[tokit])))
+    else
+      for k in pairs(destfiles) do
+        table.insert(sch, md5_file(k))
+      end
     end
-    table.insert(sch, md5.sum(activity or ""))  -- "" is pretty much equivalent
-    for k in pairs(dependencies) do
+    if activity == nil then
+      table.insert(sch, md5.sum(""))  -- "" is pretty much equivalent
+    elseif type(activity) == "string" then
+      table.insert(sch, md5.sum(activity))
+    elseif type(activity) == "function" then
+      table.insert(sch, md5.sum(string.dump(activity)))
+    else
+      assert(false)
+    end
+    for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
       table.insert(sch, files[k]:signature())
     end
+    table.sort(sch) -- heh heh. our table iteration has no guaranteed order, so we do this to guarantee an order. wheeee. technically this is slightly fragile and we should be doing this only in each "group", but, well, right now we're not.
     self.sig = md5.sum(table.concat(sch, "\0"))
     
     return self.sig
@@ -181,49 +260,13 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   return Node -- this may become a RAM issue, it may be better to embed the data in the Node and not do upvalues
 end
 
-local function make_raw_file(file)
-  assert(file:sub(1, 1) ~= "#") -- not a token wannabe
-
-  local Node = {}
-  
-  function Node:wake()
-    if not self.sig then
-      local fil = md5_file(file)
-      assert(fil ~= "")
-      self.sig = md5.sum(md5.sum(file) .. fil)
-    end
-  end
-  Node.block = Node.wake
-  function Node:signature()
-    self:wake()
-    return self.sig
-  end
-  
-  return Node
-end
-
-local function recrunch(list, item)
-  if type(item) == "string" then
-    list[item] = true
-  elseif type(item) == "table" then
-    for _, v in ipairs(item) do
-      recrunch(list, v)
-    end
-  elseif item == nil then
-  else
-    assert(false)
-  end
-end
-
 function ursa.rule(param)
   local destination, dependencies, activity = unpack(param)
   print("Making rule:", destination, dependencies, activity)
   
   local ofilelist = {}
-  local ifilelist = {}
   
-  recrunch(ofilelist, destination)
-  recrunch(ifilelist, dependencies)
+  recrunch(ofilelist, destination, true)
   
   local found_ofile = false
   for k in pairs(ofilelist) do
@@ -232,14 +275,9 @@ function ursa.rule(param)
   end
   assert(found_ofile)
   
-  for k in pairs(ifilelist) do
-    assert(not ofilelist[k])
-    if not files[k] then
-      files[k] = make_raw_file(k)
-    end
-  end
+  distill_dependencies(dependencies, ofilelist, false)
   
-  local node = make_node(destination, ofilelist, ifilelist, activity)
+  local node = make_node(destination, ofilelist, dependencies, activity)
   for k in pairs(ofilelist) do
     assert(not files[k]) -- we already tried this
     files[k] = node
@@ -250,18 +288,9 @@ function ursa.token(param)
   local destination, dependencies, activity = unpack(param)
   print("Making token:", destination, dependencies, activity)
   
-  local ifilelist = {}
+  distill_dependencies(dependencies, nil, false)
   
-  recrunch(ifilelist, dependencies)
-  
-  for k in pairs(ifilelist) do
-    assert(not ofilelist[k])
-    if not files[k] then
-      files[k] = make_raw_file(k)
-    end
-  end
-  
-  local node = make_node("#" .. destination, {["#" .. destination] = true}, ifilelist, activity, {token = true})
+  local node = make_node("#" .. destination, {["#" .. destination] = true}, dependencies, activity, {token = true})
   
   assert(not files["#" .. destination]) -- we already tried this
   files["#" .. destination] = node
@@ -270,8 +299,14 @@ function ursa.value(param)
   local tok = unpack(param)
   assert(files["#" .. tok])
   
-  files["#" .. tok]:block()
-  assert(built_tokens[tok])
+  if param.default then
+    if not built_tokens[tok] then
+      return param.default
+    end
+  else
+    files["#" .. tok]:block()
+    assert(built_tokens[tok])
+  end
   
   return built_tokens[tok]
 end
@@ -281,18 +316,11 @@ local command_default = {} -- opaque unique token
 function ursa.command(param)
   local destination, dependencies, activity = unpack(param)
   
-  local ifilelist = {}
-  recrunch(ifilelist, dependencies)
-  
-  for k in pairs(ifilelist) do
-    if not files[k] then
-      files[k] = make_raw_file(k)
-    end
-  end
+  distill_dependencies(dependencies, nil, false)
   
   assert(not commands[destination])
   
-  local node = make_node(":" .. tostring(destination), {}, ifilelist, activity, {always_rebuild = true})
+  local node = make_node(":" .. tostring(destination), {}, dependencies, activity, {always_rebuild = true, no_save = true})
   commands[destination] = node
 end
 
@@ -339,10 +367,14 @@ ursa.command = setmetatable({
 
 
 function ursa.util.system(chunk)
-  do return "" end
+  print_raw(chunk)
   local str, rv = ul.system(chunk)
   assert(rv == 0)
   return str
+end
+
+function ursa.util.value_deferred(chunk)
+  return function () return ursa.value(chunk) end
 end
 
 wrap_funcs(ursa.util)

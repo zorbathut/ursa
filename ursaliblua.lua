@@ -15,6 +15,19 @@ local persistence
 
 persistence =
 {
+  dump = function(item)
+    local stix = {}
+    function stix:write(txt)
+      table.insert(self, txt)
+      for i = #self - 1, 1, -1 do
+        if string.len(self[i]) > string.len(self[i + 1]) then break end
+        self[i] = self[i] .. table.remove(self, i + 1)
+      end
+    end
+    persistence.write(stix, item, 0)
+    return table.concat(stix)
+  end;
+  
 	save = function (filename, item)
     local f = io.open(filename, "wb")
     assert(f)
