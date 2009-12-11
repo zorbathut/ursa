@@ -1,6 +1,8 @@
 
-require "luarocks.loader"
+print("req md5 wat")
 require "md5"
+print("hoohah")
+
 require "ursalibc"
 require "ursaliblua"
 
@@ -34,6 +36,10 @@ local function md5_file(filename, hexa)
   local dat = file:read("*a")
   assert(dat, filename, #filename)
   file:close()
+  print("yoop")
+  collectgarbage("collect")
+  print("yarp")
+  
   local rv = hexa and md5.sumhexa(dat) or md5.sum(dat)
   --garbaj()
   return rv
@@ -89,6 +95,7 @@ local function make_raw_file(file)
     self:wake()
     return self.sig
   end
+  Node.static = true
   
   return Node
 end
@@ -167,6 +174,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       end
       print("wi e")
       if not flags.always_rebuild and self:signature() == built_signatures[sig] then
+        print("marking as finished")
         self.state = "finished"
       else
         -- add self to production queue
@@ -186,6 +194,8 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         self.sig = nil
         files[k]:block()
       end
+      
+      self.sig = nil
       
       if not flags.token then
         for k in pairs(realfiles) do
@@ -255,6 +265,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     
     local sch = {}
     if flags.token then
+      print("token sig is", tokit, built_tokens[tokit])
       table.insert(sch, md5.sum(ul.persistence.dump(built_tokens[tokit])))
     else
       for k in pairs(destfiles) do
@@ -306,7 +317,7 @@ function ursa.rule(param)
   end
 end
 
-function ursa.token(param)
+function ursa.token_rule(param)
   local destination, dependencies, activity = unpack(param)
   print("Making token:", destination, dependencies, activity)
   
@@ -317,7 +328,7 @@ function ursa.token(param)
   assert(not files["#" .. destination]) -- we already tried this
   files["#" .. destination] = node
 end
-function ursa.value(param)
+function ursa.token(param)
   local tok = unpack(param)
   assert(files["#" .. tok])
   
@@ -327,7 +338,7 @@ function ursa.value(param)
     end
   else
     files["#" .. tok]:block()
-    assert(built_tokens[tok])
+    assert(built_tokens[tok], "didn't build " .. tok)
   end
   
   return built_tokens[tok]
@@ -352,7 +363,7 @@ print("sb")
     param = {command_default}
   end
   
-  local status, rv = pcall(function ()
+  local status, rv = xpcall(function ()
     print("ip")
     for _, v in ipairs(param) do
       assert(commands[v], v)
@@ -367,7 +378,7 @@ print("sb")
       print("blockout")
     end
     print("ip done")
-  end)
+  end, function (err) return err .. "\n" .. debug.traceback() end)
   
   print("sav")
   ul.persistence.save(".ursa.cache", {serial_v, built_signatures, built_tokens})
@@ -378,22 +389,45 @@ print("sb")
   filcs:close()
   
   if not status then
-    print(rv)
+    print_raw(rv)
     os.exit(1)
   end
 end
 
-local function wrap_funcs(chunk)
+-- returns an iterator to list all generated files
+function ursa.list()
+  return coroutine.wrap(function ()
+    local cp = nil
+    while true do
+      local nd
+      cp, nd = next(files, cp)
+      if not cp then break end
+      if not nd.static then
+        coroutine.yield(cp)
+      end
+    end
+  end)
+end
+
+function ursa.token_clear(tok)
+  local toki = unpack(tok)
+  built_tokens[toki] = nil
+end
+
+ursa.gen = {ul = ul, print = print, print_raw = print_raw}
+
+function ursa.gen.wrap_funcs(chunk)
   for k, v in pairs(chunk) do
     if type(v) == "function" then
       ursa[k] = function (block, ...)
         assert(select('#', ...) == 0)
+        assert(type(block) == "table")
         return v(block)
       end
     end
   end
 end
-wrap_funcs(ursa)
+ursa.gen.wrap_funcs(ursa)
 
 local uc = ursa.command
 ursa.command = setmetatable({
@@ -402,18 +436,18 @@ ursa.command = setmetatable({
   __call = function(_, ...) return uc(...) end
 })
 
+local token_clear = ursa.token_clear
+local token_rule = ursa.token_rule
+local token_value = ursa.token
 
-function ursa.util.system(chunk)
-  print_raw(chunk)
-  local str, rv = ul.system(chunk)
-  assert(rv == 0)
-  str = str:match("^%s*(.-)%s*$")
-  assert(str)
-  return str
-end
+ursa.token = setmetatable({
+  rule = token_rule,
+  clear = token_clear,
+}, {
+  __call = function(_, ...) return token_value(...) end
+})
 
-function ursa.util.value_deferred(chunk)
-  return function () return ursa.value(chunk) end
-end
 
-wrap_funcs(ursa.util)
+require "ursa.util"
+
+ursa.gen = nil

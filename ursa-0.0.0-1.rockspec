@@ -11,13 +11,13 @@ description = {
 }
 dependencies = {
   "lua >= 5.1",
-  "md5 >= 1.1.0",
 }
 build = {
   type = "builtin",
   
   modules = {
     ursa = "ursa.lua",
+    ["ursa.util"] = "util.lua",
     
     ursaliblua = "ursaliblua.lua",
     

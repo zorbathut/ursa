@@ -26,8 +26,8 @@ for _, file in ipairs(sources) do
   local o = file .. ".o"
   local depend = file .. " dependencies"
   
-  ursa.token{depend, ursa.util.value_deferred{depend, default = cpp}, function () return make_dependencies(cpp) end}
-  ursa.rule{o, ursa.util.value_deferred{depend}, ("g++ -o %s.o -c %s.cpp"):format(file, file)}
+  ursa.token.rule{depend, ursa.util.token_deferred{depend, default = cpp}, function () return make_dependencies(cpp) end}
+  ursa.rule{o, ursa.util.token_deferred{depend}, ("g++ -o %s.o -c %s.cpp"):format(file, file)}
   table.insert(objects, o)
 end
  
