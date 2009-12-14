@@ -94,7 +94,13 @@ persistence =
         end
         
         table.sort(order, function (a, b)
-          if type(a) == type(b) then return a < b end
+          if type(a) == type(b) then
+            if type(a) == "table" then
+              return false
+            else
+              return a < b
+            end
+          end
           return type(a) < type(b)
         end)
         

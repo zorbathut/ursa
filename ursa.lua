@@ -14,6 +14,15 @@ ursaliblua = nil
 
 local print_raw = print
 
+local current_print_prefix = ""
+local function print_status(...)
+  if current_print_prefix ~= "" then
+    print(current_print_prefix, ...)
+  else
+    print(...)
+  end
+end
+
 local function print(...)
   print_raw("ursadbg", ...)
 end
@@ -36,9 +45,9 @@ local function md5_file(filename, hexa)
   local dat = file:read("*a")
   assert(dat, filename, #filename)
   file:close()
-  print("yoop")
+  --print("yoop")
   collectgarbage("collect")
-  print("yarp")
+  --print("yarp")
   
   local rv = hexa and md5.sumhexa(dat) or md5.sum(dat)
   --garbaj()
@@ -71,6 +80,43 @@ do
   if cache then cache:close() end
 end
 
+-- wish there were a better way to do this
+local function return_pack(...)
+  return {..., n = select('#', ...)}
+end
+local function return_unpack(item)
+  return unpack(item, item.n)
+end
+
+-- it may seem like we should be chdir'ing when things are pushed or popped, but we actually live "natively" in the root directory. We only chdir when we need to.
+local context_stack = {{prefix = "", absolute = ul.getcwd()}}
+local function context_stack_push(chunk)
+  --print("pushing stack", chunk.prefix, chunk.absolute)
+  table.insert(context_stack, chunk)
+end
+local function context_stack_pop()
+  --print("popping stack")
+  table.remove(context_stack)
+end
+local function context_stack_prefix()
+  if context_stack[#context_stack].prefix == "" then return "" end
+  return context_stack[#context_stack].prefix .. "/"
+end
+local function context_stack_chdir(func, ...)
+  local cops = ul.getcwd()
+  ul.chdir(context_stack[#context_stack].absolute)
+  current_print_prefix = context_stack[#context_stack].prefix
+  --print("CHDIR INTO", context_stack[#context_stack].absolute)
+  local rp = return_pack(func(...))
+  current_print_prefix = ""
+  --print("CHDIR EXIT")
+  ul.chdir(cops)
+  return return_unpack(rp)
+end
+local function context_stack_get()
+  return context_stack[#context_stack]
+end
+
 
 local function make_raw_file(file)
   assert(file:sub(1, 1) ~= "#") -- not a token wannabe
@@ -78,17 +124,21 @@ local function make_raw_file(file)
   local Node = {}
   
   function Node:wake()
-    print("rwak a")
+    --print("rwak a")
     if not self.sig then
-      print("rwak b")
-      local fil = md5_file(file, true)
-      print("rwak c")
-      assert(fil ~= "", file)
-      print("rwak d")
+      --print("rwak ba")
+      context_stack_push(context_stack[1])
+      --print("rwak bb")
+      local fil = context_stack_chdir(md5_file, file, true)
+      --print("rwak bc")
+      context_stack_pop()
+      --print("rwak c")
+      assert(fil ~= "", "Couldn't locate raw file " .. file .. " in context " .. ul.getcwd())
+      --print("rwak d")
       self.sig = md5.sum(md5.sum(file) .. fil)
-      print("rwak e")
+      --print("rwak e")
     end
-    print("rwak f")
+    --print("rwak f")
   end
   Node.block = Node.wake
   function Node:signature()
@@ -102,7 +152,7 @@ end
 
 local function recrunch(list, item, resolve_functions)
   if type(item) == "string" then
-    list[item] = true
+    list[context_stack_prefix() .. item] = true
   elseif type(item) == "table" then
     local ipct = 0
     for _, v in ipairs(item) do
@@ -115,7 +165,7 @@ local function recrunch(list, item, resolve_functions)
     assert(ipct == 0)
   elseif type(item) == "function" then
     if resolve_functions then
-      recrunch(list, item())
+      recrunch(list, context_stack_chdir(item))
     end
   elseif item == nil then
   else
@@ -149,9 +199,11 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   local tokens = {}
   local tokcount = 0
   local tokit = nil
+  local simpledests = {}
   for k in pairs(destfiles) do
     if k:sub(1, 1) ~= "#" then
       realfiles[k] = true
+      table.insert(simpledests, k)
     else
       tokens[k:sub(2)] = true
       tokcount = tokcount + 1
@@ -159,31 +211,35 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     end
   end
   assert(tokcount < 2)
+  
+  Node.context = context_stack_get()
 
   Node.state = "asleep"
   function Node:wake()  -- wake up, I'm gonna need you. get yourself ready to be processed and start crunching
-    print("wi a")
+    --print("wi a")
     if self.state == "asleep" then
       self.state = "working"
       
-      print("wi b")
+      --print("wi b")
       for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
-        print("wi c")
+        --print("wi c")
         files[k]:wake()
-        print("wi d")
+        --print("wi d")
       end
-      print("wi e")
+      --print("wi e")
       if not flags.always_rebuild and self:signature() == built_signatures[sig] then
-        print("marking as finished")
+        --print("marking as finished")
         self.state = "finished"
       else
         -- add self to production queue
       end
-      print("wi f")
+      --print("wi f")
     end
-    print("wi g")
+    --print("wi g")
   end
   function Node:block()  -- please return once you're done and yield/grind until then
+    local did_something = false
+    
     if self.state == "asleep" then
       self:wake()
     end
@@ -197,13 +253,21 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       
       self.sig = nil
       
+      local simpledeps = {}
+      do
+        local depp = distill_dependencies(dependencies, destfiles, true)
+        for k in pairs(depp) do
+          table.insert(simpledeps, k) -- grr
+        end
+      end
+    
       if not flags.token then
         for k in pairs(realfiles) do
           os.remove(k)
           local path = k:match("(.*)/[^/]+")
           if path and not paths_made[path] then
             local cmd = "mkdir -p -v " .. path
-            print_raw(cmd)
+            print_status(cmd)
             os.execute(cmd)
             paths_made[path] = true
           end
@@ -211,8 +275,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         
         --print("Activity on", sig, activity)
         if type(activity) == "string" then
-          print_raw(activity)
-          local rv = os.execute(activity)
+          local rv = context_stack_chdir(function (line) print_status(line) return os.execute(line) end, activity)
           if rv ~= 0 then
             for k in pairs(destfiles) do
               os.remove(k)
@@ -220,7 +283,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
             assert(false)
           end
         elseif type(activity) == "function" then
-          activity()
+          context_stack_chdir(activity, simpledests, simpledeps)
         elseif activity == nil then
         else
           assert(false) -- whups
@@ -230,7 +293,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         for k in pairs(destfiles) do
           if k:sub(1, 1) ~= "#" then
             local check = io.open(k, "r")
-            assert(check)
+            assert(check, "File " .. k .. " wasn't generated by the given build step.")
             check:close()
           end
         end
@@ -240,10 +303,9 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         built_tokens[tokit] = nil
         
         if type(activity) == "string" then
-          print_raw(activity)
-          built_tokens[tokit] = ursa.util.system(activity)
+          built_tokens[tokit] = context_stack_chdir(ursa.util.system, {activity})
         elseif type(activity) == "function" then
-          built_tokens[tokit] = activity()
+          built_tokens[tokit] = context_stack_chdir(activity, simpledests, simpledeps)
         else
           assert(false) -- whups
         end
@@ -265,30 +327,59 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     
     local sch = {}
     if flags.token then
-      print("token sig is", tokit, built_tokens[tokit])
+      --print("token sig is", tokit, built_tokens[tokit])
+      --print("ts 0")
       table.insert(sch, md5.sum(ul.persistence.dump(built_tokens[tokit])))
+      --print("ts a")
     else
       for k in pairs(destfiles) do
         table.insert(sch, md5_file(k))
       end
     end
+    --print("ts b")
     if activity == nil then
+      --print("ts c")
       table.insert(sch, md5.sum(""))  -- "" is pretty much equivalent
+      --print("ts d")
     elseif type(activity) == "string" then
+      --print("ts e")
       table.insert(sch, md5.sum(activity))
+      --print("ts f")
     elseif type(activity) == "function" then
+      --print("ts g")
       table.insert(sch, md5.sum(string.dump(activity)))
+      --print("ts h")
     else
       assert(false)
     end
+    --print("ts i")
     for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
+      --print("ts j")
       table.insert(sch, files[k]:signature())
+      --print("ts k")
     end
+    --print("ts l")
     table.sort(sch) -- heh heh. our table iteration has no guaranteed order, so we do this to guarantee an order. wheeee. technically this is slightly fragile and we should be doing this only in each "group", but, well, right now we're not.
+    --print("ts m")
     self.sig = md5.sum(table.concat(sch, "\0"))
+    --print("ts n")
     
     return self.sig
   end
+  
+  local function wrap(func)
+    return function (...)
+      context_stack_push(Node.context)
+      local rv = return_pack(func(...))
+      assert(context_stack_get() == Node.context)
+      context_stack_pop()
+      return return_unpack(rv)
+    end
+  end
+  
+  Node.wake = wrap(Node.wake)
+  Node.block = wrap(Node.block)
+  Node.signature = wrap(Node.signature)
   
   return Node -- this may become a RAM issue, it may be better to embed the data in the Node and not do upvalues
 end
@@ -303,10 +394,11 @@ function ursa.rule(param)
   
   local found_ofile = false
   for k in pairs(ofilelist) do
+    --print("yoop", k)
     assert(not files[k])
     found_ofile = true
   end
-  assert(found_ofile)
+  assert(found_ofile, "no output files found?")
   
   distill_dependencies(dependencies, ofilelist, false)
   
@@ -349,6 +441,8 @@ local command_default = {} -- opaque unique token
 function ursa.command(param)
   local destination, dependencies, activity = unpack(param)
   
+  print("Making command:", destination, dependencies, activity)
+  
   distill_dependencies(dependencies, nil, false)
   
   assert(not commands[destination])
@@ -358,29 +452,29 @@ function ursa.command(param)
 end
 
 function ursa.build(param)
-print("sb")
+--print("sb")
   if #param == 0 then
     param = {command_default}
   end
   
   local status, rv = xpcall(function ()
-    print("ip")
+    --print("ip")
     for _, v in ipairs(param) do
       assert(commands[v], v)
-      print("wakein")
+      --print("wakein")
       commands[v]:wake()
-      print("wakeout")
+      --print("wakeout")
     end
     for _, v in ipairs(param) do
       assert(commands[v])
-      print("blockin")
+      --print("blockin")
       commands[v]:block()
-      print("blockout")
+      --print("blockout")
     end
-    print("ip done")
+    --print("ip done")
   end, function (err) return err .. "\n" .. debug.traceback() end)
   
-  print("sav")
+  --print("sav")
   ul.persistence.save(".ursa.cache", {serial_v, built_signatures, built_tokens})
   
   local cs = md5_file(".ursa.cache", true)
@@ -389,7 +483,7 @@ print("sb")
   filcs:close()
   
   if not status then
-    print_raw(rv)
+    print_status(rv)
     os.exit(1)
   end
 end
@@ -414,7 +508,29 @@ function ursa.token_clear(tok)
   built_tokens[toki] = nil
 end
 
-ursa.gen = {ul = ul, print = print, print_raw = print_raw}
+function ursa.embed(dat)
+  local path, file = unpack(dat)
+  local context = context_stack_get()
+  local absolute = context_stack_chdir(function () ul.chdir(path) return ul.getcwd() end)
+  local prefix = context_stack_prefix() .. path
+  
+  print("Embedding:", path, file, prefix, absolute)
+  
+  local uc, ub, ul, utc = ursa.command, ursa.build, ursa.list, ursa.token.clear
+  ursa.command = setmetatable({default = command_default,}, {__call = function () end})
+  function ursa.build() end
+  function ursa.list() assert(false) end
+  function ursa.token.clear() assert(false) end
+  context_stack_push({prefix = prefix, absolute = absolute})
+  context_stack_chdir(function ()
+    loadfile(file)()
+  end)
+  context_stack_pop()
+  ursa.command, ursa.build, ursa.list, ursa.token.clear = uc, ub, ul, utc
+  print("Ending embed")
+end
+
+ursa.gen = {ul = ul, print = print, print_status = print_status}
 
 function ursa.gen.wrap_funcs(chunk)
   for k, v in pairs(chunk) do
