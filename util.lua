@@ -35,7 +35,28 @@ function ursa.util.system_template(st)
     if str:find("$TARGET") and not str:find("$TARGETS") then assert(#dests == 1) end
     if str:find("$SOURCE") and not str:find("$SOURCES") then assert(#deps == 1) end
     
-    return ursa.util.system{str:gsub("$TARGETS", table.concat(dests, " ")):gsub("$TARGET", dests[1]):gsub("$SOURCES", table.concat(deps, " ")):gsub("$SOURCE", deps[1])}
+    local outdeps = {}
+    for _, v in pairs(deps) do
+      if v:sub(1, 1) ~= "#" then
+        table.insert(outdeps, v)
+      end
+    end
+    
+    return ursa.util.system{str:gsub("$TARGETS", table.concat(dests, " ")):gsub("$TARGET", dests[1]):gsub("$SOURCES", table.concat(outdeps, " ")):gsub("$SOURCE", deps[1]):gsub("#([%w_]+)", function (param) return ursa.token{param} end)}
+  end
+end
+
+function ursa.util.once(st)
+  local func = unpack(st)
+  local touched = false
+  local rv
+  return function(...)
+    if not touched then
+      rv = func(...)
+      touched = true
+    end
+    
+    return rv
   end
 end
 

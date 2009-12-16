@@ -1,4 +1,14 @@
 
+--[[ Prefixes:
+
+#value
+:command
+!literal
+@absolute
+#@valueabsolute
+
+]]
+
 print("req md5 wat")
 require "md5"
 print("hoohah")
@@ -150,13 +160,73 @@ local function make_raw_file(file)
   return Node
 end
 
+-- path manipulations
+-- assumes the file "orig" is relative to the denroot, returns an appropriate path from the "newhead" location
+local function relativize(orig, newhead)
+  local realorig = orig
+  for stx in newhead:gmatch("[^/]+") do
+    local top, rest = orig:match("^([^/]+)/(.*)")
+    if top == stx then
+      orig = rest
+    else
+      orig = "../" .. orig
+    end
+  end
+  return orig
+end
+
+local function make_standard_path(item)
+  -- get rid of various relative paths
+  local itex = item:gsub("[%w_]+/\.\./", "")
+  item = itex
+  assert(not item:find("/../"), "Path appears to be relative: " .. item)
+  assert(not item:find("/./"), "Path appears to be relative: " .. item)
+  
+  local prefix = item:sub(1, 1)
+  if prefix == "#" then
+    local block = item:sub(2)
+    if block:sub(1, 1) == "@" then
+      return '#' .. block:sub(2)
+    else
+      return '#' .. context_stack_prefix() .. block -- relative injection
+    end
+  elseif prefix == "!" then
+    return prefix -- literal
+  elseif prefix == "@" then
+    return item:sub(2) -- absolute path, strip off the prefix
+  elseif prefix == ":" then
+    assert(false) -- not supported
+  elseif prefix == "." then
+    assert(false) -- relative paths are evil
+  else
+    return context_stack_prefix() .. item
+  end
+end
+local function make_absolute_from_core(path)
+  local prefix = path:sub(1, 1)
+  if prefix == "#" then
+    return "#@" .. path:sub(2)
+  elseif prefix == "!" then
+    assert(false)
+    return prefix -- literal
+  elseif prefix == "@" then
+    assert(false) -- what
+  elseif prefix == ":" then
+    assert(false) -- not supported
+  elseif prefix == "." then
+    assert(false) -- relative paths are evil
+  else
+    return "@" .. path
+  end
+end
+
 local function recrunch(list, item, resolve_functions)
   if type(item) == "string" then
-    list[context_stack_prefix() .. item] = true
+    list[make_standard_path(item)] = true
   elseif type(item) == "table" then
     local ipct = 0
     for _, v in ipairs(item) do
-      recrunch(list, v)
+      recrunch(list, v, resolve_functions)
       ipct = ipct + 1
     end
     for _, v in pairs(item) do
@@ -165,7 +235,7 @@ local function recrunch(list, item, resolve_functions)
     assert(ipct == 0)
   elseif type(item) == "function" then
     if resolve_functions then
-      recrunch(list, context_stack_chdir(item))
+      recrunch(list, context_stack_chdir(item), resolve_functions)
     end
   elseif item == nil then
   else
@@ -175,14 +245,22 @@ end
 
 local function distill_dependencies(dependencies, ofilelist, resolve_functions)
   local ifilelist = {}
+  local literals = {}
   recrunch(ifilelist, dependencies, resolve_functions)
   for k in pairs(ifilelist) do
     assert(not ofilelist or not ofilelist[k])
     if not files[k] then
-      files[k] = make_raw_file(k)
+      if k:sub(1, 1) ~= "!" then
+        files[k] = make_raw_file(k)
+      else
+        literals[k] = true
+      end
     end
   end
-  return ifilelist
+  for k in pairs(literals) do
+    ifilelist[k] = nil
+  end
+  return ifilelist, literals
 end
 
 local function make_node(sig, destfiles, dependencies, activity, flags)
@@ -203,7 +281,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   for k in pairs(destfiles) do
     if k:sub(1, 1) ~= "#" then
       realfiles[k] = true
-      table.insert(simpledests, k)
+      table.insert(simpledests, relativize(k, context_stack_prefix()))
     else
       tokens[k:sub(2)] = true
       tokcount = tokcount + 1
@@ -216,19 +294,14 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
 
   Node.state = "asleep"
   function Node:wake()  -- wake up, I'm gonna need you. get yourself ready to be processed and start crunching
-    --print("wi a")
     if self.state == "asleep" then
       self.state = "working"
       
-      --print("wi b")
       for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
-        --print("wi c")
         files[k]:wake()
-        --print("wi d")
       end
-      --print("wi e")
+      
       if not flags.always_rebuild and self:signature() == built_signatures[sig] then
-        --print("marking as finished")
         self.state = "finished"
       else
         -- add self to production queue
@@ -239,13 +312,13 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   end
   function Node:block()  -- please return once you're done and yield/grind until then
     local did_something = false
+    --print("blocking on", sig, self.state)
     
     if self.state == "asleep" then
       self:wake()
     end
     
     if self.state == "working" then
-      --print("Blocking on ", sig)
       for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
         self.sig = nil
         files[k]:block()
@@ -254,11 +327,8 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       self.sig = nil
       
       local simpledeps = {}
-      do
-        local depp = distill_dependencies(dependencies, destfiles, true)
-        for k in pairs(depp) do
-          table.insert(simpledeps, k) -- grr
-        end
+      for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
+        table.insert(simpledeps, relativize(k, context_stack_prefix())) -- grr
       end
     
       if not flags.token then
@@ -327,10 +397,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     
     local sch = {}
     if flags.token then
-      --print("token sig is", tokit, built_tokens[tokit])
-      --print("ts 0")
       table.insert(sch, md5.sum(ul.persistence.dump(built_tokens[tokit])))
-      --print("ts a")
     else
       for k in pairs(destfiles) do
         table.insert(sch, md5_file(k))
@@ -353,10 +420,12 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       assert(false)
     end
     --print("ts i")
-    for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
-      --print("ts j")
+    local deps, literals = distill_dependencies(dependencies, destfiles, true)
+    for k in pairs(deps) do
       table.insert(sch, files[k]:signature())
-      --print("ts k")
+    end
+    for k in pairs(literals) do
+      table.insert(sch, k)
     end
     --print("ts l")
     table.sort(sch) -- heh heh. our table iteration has no guaranteed order, so we do this to guarantee an order. wheeee. technically this is slightly fragile and we should be doing this only in each "group", but, well, right now we're not.
@@ -389,14 +458,17 @@ function ursa.rule(param)
   print("Making rule:", destination, dependencies, activity)
   
   local ofilelist = {}
+  local ofileabs = {}
   
   recrunch(ofilelist, destination, true)
   
   local found_ofile = false
   for k in pairs(ofilelist) do
     --print("yoop", k)
-    assert(not files[k])
+    assert(not files[k], "output file " .. k .. " already defined")
     found_ofile = true
+    
+    table.insert(ofileabs, make_absolute_from_core(k))
   end
   assert(found_ofile, "no output files found?")
   
@@ -407,6 +479,8 @@ function ursa.rule(param)
     assert(not files[k]) -- we already tried this
     files[k] = node
   end
+  
+  return ofileabs
 end
 
 function ursa.token_rule(param)
@@ -415,25 +489,39 @@ function ursa.token_rule(param)
   
   distill_dependencies(dependencies, nil, false)
   
-  local node = make_node("#" .. destination, {["#" .. destination] = true}, dependencies, activity, {token = true})
+  local spath = make_standard_path("#" .. destination)
   
-  assert(not files["#" .. destination]) -- we already tried this
-  files["#" .. destination] = node
+  local node = make_node(spath, {[spath] = true}, dependencies, activity, {token = true})
+  
+  if files[spath] then
+    if files[spath].static then
+      assert(false, spath .. " used before it was defined. Re-order your definitions!")
+    else
+      assert(false, spath .. " defined multiple times.")
+    end
+  end
+  
+  files[spath] = node
+  
+  return make_absolute_from_core(spath)
 end
 function ursa.token(param)
   local tok = unpack(param)
-  assert(files["#" .. tok])
+  tok = make_standard_path("#" .. tok)
+  local tokp = tok:sub(2)
+  
+  assert(files[tok])
   
   if param.default then
-    if not built_tokens[tok] then
+    if not built_tokens[tokp] then
       return param.default
     end
   else
-    files["#" .. tok]:block()
-    assert(built_tokens[tok], "didn't build " .. tok)
+    files[tok]:block()
+    assert(built_tokens[tokp], "didn't build " .. tok)
   end
   
-  return built_tokens[tok]
+  return built_tokens[tokp]
 end
 
 local command_default = {} -- opaque unique token
@@ -472,6 +560,7 @@ function ursa.build(param)
       --print("blockout")
     end
     --print("ip done")
+    print("build complete")
   end, function (err) return err .. "\n" .. debug.traceback() end)
   
   --print("sav")
@@ -517,17 +606,23 @@ function ursa.embed(dat)
   print("Embedding:", path, file, prefix, absolute)
   
   local uc, ub, ul, utc = ursa.command, ursa.build, ursa.list, ursa.token.clear
-  ursa.command = setmetatable({default = command_default,}, {__call = function () end})
+  ursa.command = setmetatable({default = command_default}, {__call = function () end})
   function ursa.build() end
   function ursa.list() assert(false) end
   function ursa.token.clear() assert(false) end
   context_stack_push({prefix = prefix, absolute = absolute})
-  context_stack_chdir(function ()
-    loadfile(file)()
-  end)
+  local rv = return_pack(context_stack_chdir(function ()
+    local d, e = loadfile(file)
+    if not d then
+      error(e)
+    end
+    return d()
+  end))
   context_stack_pop()
   ursa.command, ursa.build, ursa.list, ursa.token.clear = uc, ub, ul, utc
   print("Ending embed")
+  
+  return return_unpack(rv)
 end
 
 ursa.gen = {ul = ul, print = print, print_status = print_status}
