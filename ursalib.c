@@ -2,6 +2,9 @@
 #include "lua.h"
 #include "lauxlib.h"
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static int ursalib_system(lua_State *L) {
   //printf("ULS 1\n");
@@ -47,12 +50,22 @@ static int ursalib_chdir(lua_State *L) {
   return 0;
 }
 
+static int ursalib_mtime(lua_State *L) {
+  const char *st = luaL_checklstring(L, 1, NULL);
+  struct stat stt;
+  int rv = stat(st, &stt);
+  if(rv == -1) return 0;
+  lua_pushinteger(L, stt.st_mtime);
+  return 1;
+}
+
 LUALIB_API int luaopen_ursalibc(lua_State *L)
 {
   const luaL_reg ursil[] = {
     {"system", ursalib_system},
     {"getcwd", ursalib_getcwd},
     {"chdir", ursalib_chdir},
+    {"mtime", ursalib_mtime},
     {NULL, NULL}
   };
 

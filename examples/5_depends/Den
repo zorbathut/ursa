@@ -9,7 +9,7 @@ local sources = {"main", "ui", "log"}
 
 -- Parse the result from g++'s built-in dependency scanner
 local function make_dependencies(srcfile)
-  local deps = ursa.util.system(("g++ -MM %s"):format(srcfile))
+  local deps = ursa.util.system{("g++ -MM %s"):format(srcfile)}
   deps = deps:match("^.*: (.*)$")
   
   local dependencies = {}
