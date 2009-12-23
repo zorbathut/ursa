@@ -6,8 +6,8 @@ require "luarocks.loader"
 require "ursa"
 
 -- List our source files
-local libpng_cflags = ursa.util.system("pkg-config libpng --cflags")
-local libpng_linkflags = ursa.util.system("pkg-config libpng --libs")
+local libpng_cflags = ursa.util.system{"pkg-config libpng --cflags"}
+local libpng_linkflags = ursa.util.system{"pkg-config libpng --libs"}
 
 local sources = {"main", "ui", "debug", "log", "driver_vga", "driver_console", "driver_x"}
 

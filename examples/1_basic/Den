@@ -9,7 +9,7 @@ require "ursa"
 ursa.rule{"hello.o", "hello.cpp", "g++ -o hello.o -c hello.cpp"}
 
 -- Define a rule to build "hello"
-ursa.rule{"hello.exe", "hello.o", "g++ -o hello hello.o"}
+ursa.rule{"hello.exe", "hello.o", "g++ -o hello.exe hello.o"}
 
 -- Define a pair of commands that can be triggered as build targets
 ursa.command{ursa.command.default, "hello.exe"}
