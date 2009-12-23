@@ -184,10 +184,15 @@ end
 
 local function make_standard_path(item)
   -- get rid of various relative paths
-  local itex = item:gsub("[%w_]+/\.\./", "")
-  item = itex
-  assert(not item:find("/../"), "Path appears to be relative: " .. item)
-  assert(not item:find("/./"), "Path appears to be relative: " .. item)
+  local new_item = item
+  while true do
+    local itex = new_item:gsub("[%w_]+/\.\./", "")
+    if itex == new_item then break end
+    new_item = itex
+  end
+  assert(not new_item:find("/../"), "Path appears to be relative: " .. item .. " (converted to " .. new_item .. ")")
+  assert(not new_item:find("/./"), "Path appears to be relative: " .. item .. " (converted to " .. new_item .. ")")
+  item = new_item
   
   local prefix = item:sub(1, 1)
   if prefix == "#" then
