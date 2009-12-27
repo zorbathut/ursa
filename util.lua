@@ -14,14 +14,19 @@ function ursa.util.system(tex)
 end
 
 function ursa.util.token_deferred(chunk)
-  return function () return ursa.token(chunk) end
+  local func = function () return ursa.token(chunk) end
+  if chunk.default then
+    return func
+  else
+    return {"#" .. chunk[1], func}
+  end
 end
 
 function ursa.util.clean()
-  for k in ursa.list{} do
+  for k in ursa.FRAGILE.list{} do
     if k:sub(1, 1) == '#' then
       print_status("clearing " .. k)
-      ursa.token.clear{k:sub(2)}
+      ursa.FRAGILE.token_clear{k:sub(2)}
     else
       print_status("removing " .. k)
       os.remove(k)
@@ -42,7 +47,14 @@ function ursa.util.system_template(st)
       end
     end
     
-    return ursa.util.system{str:gsub("$TARGETS", table.concat(dests, " ")):gsub("$TARGET", dests[1]):gsub("$SOURCES", table.concat(outdeps, " ")):gsub("$SOURCE", deps[1]):gsub("#([%w_]+)", function (param) return ursa.token{param} end)}
+    local stpass = str
+    str = str:gsub("$TARGETS", ursa.FRAGILE.parenthesize(dests))
+    str = str:gsub("$TARGET", ursa.FRAGILE.parenthesize(dests and dests[1]))
+    str = str:gsub("$SOURCES", ursa.FRAGILE.parenthesize(outdeps))
+    str = str:gsub("$SOURCE", ursa.FRAGILE.parenthesize(deps and deps[1]))
+    str = str:gsub("#([%w_]+)", function (param) return ursa.token{param} end)
+    
+    return ursa.util.system{str}
   end
 end
 

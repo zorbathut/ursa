@@ -53,7 +53,7 @@ static int ursalib_chdir(lua_State *L) {
 static int ursalib_mtime(lua_State *L) {
   const char *st = luaL_checklstring(L, 1, NULL);
   struct stat stt;
-  int rv = stat(st, &stt);
+  int rv = lstat(st, &stt);
   if(rv == -1) return 0;
   lua_pushinteger(L, stt.st_mtime);
   return 1;
