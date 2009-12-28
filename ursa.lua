@@ -9,6 +9,21 @@
 
 ]]
 
+local tree_tree = {}
+local tree_stack = {}
+local tree_roots = {}
+local tree_static = {}
+local tree_modified = {}
+
+local function tree_push(item)
+  if #tree_stack == 0 then table.insert(tree_roots, item) end
+  table.insert(tree_stack, item)
+  if not tree_tree[item] then tree_tree[item] = {} end
+end
+local function tree_pop(item)
+  assert(table.remove(tree_stack) == item)
+end
+
 require "md5"
 
 require "ursalibc"
@@ -154,10 +169,15 @@ end
 
 local function make_raw_file(file)
   assert(file:sub(1, 1) ~= "#", "attempted to use undefined token " .. file) -- not a token wannabe
+  tree_static[file] = true
+  print("staticed", file)
 
   local Node = {}
   
   function Node:wake()
+    --print(#tree_stack, tree_stack[#tree_stack], tree_tree[tree_stack[#tree_stack]], file)
+    tree_tree[tree_stack[#tree_stack]][file] = true
+    
     --print("rwak a")
     if not self.sig then
       --print("rwak ba")
@@ -171,6 +191,12 @@ local function make_raw_file(file)
       --print("rwak d")
       self.sig = md5.sum(md5.sum(file) .. fil)
       --print("rwak e")
+      
+      if built_signatures[file] ~= self.sig then
+        tree_modified[file] = true
+      end
+      
+      built_signatures[file] = self.sig
     end
     --print("rwak f")
   end
@@ -326,6 +352,15 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
 
   Node.state = "asleep"
   function Node:wake()  -- wake up, I'm gonna need you. get yourself ready to be processed and start crunching
+    if tree_stack[#tree_stack] then
+      --print(#tree_stack, tree_stack[#tree_stack], tree_tree[tree_stack[#tree_stack]], sig)
+      assert(tree_tree[tree_stack[#tree_stack]])
+      tree_tree[tree_stack[#tree_stack]][sig] = true
+    end
+    if not tree_tree[sig] then tree_tree[sig] = {} end
+    
+    tree_push(sig)
+    
     if self.state == "asleep" then
       self.state = "working"
       
@@ -336,6 +371,8 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       -- add self to production queue
       -- maybe not do it if everything downstream is truly finished?
     end
+    
+    tree_pop(sig)
   end
   function Node:block()  -- please return once you're done and yield/grind until then
     local did_something = false
@@ -353,6 +390,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       
       --print("PRESIG", sig, self:signature(), built_signatures[sig])
       if flags.always_rebuild or self:signature() ~= built_signatures[sig] then
+        tree_modified[sig] = true
         self.sig = nil
         
         local simpledeps = {}
@@ -514,7 +552,7 @@ function ursa.rule(param)
       table.insert(fill, k)
     end
     table.sort(fill)
-    destination = "{" .. table.concat(fill, "<--->") .. "}"
+    destination = "{" .. table.concat(fill, "; ") .. "}"
   end
   
   local node = make_node(destination, ofilelist, dependencies, activity, param)
@@ -582,7 +620,18 @@ function ursa.command(param)
   commands[destination] = node
 end
 
+local in_build = false
+local build_id = 1
 function ursa.build(param)
+  local outer = not in_build
+  local tid = "(build " .. build_id .. " {" .. tostring(param[1]) .. "})"
+  build_id = build_id + 1
+  tree_push(tid)
+  
+  if outer then
+    in_build = true
+  end
+  
   if #param == 0 then
     param = {command_default}
   end
@@ -594,27 +643,61 @@ function ursa.build(param)
     table.insert(items, ite)
   end
   
-  local status, rv = xpcall(function ()
+  local function proc()
     for _, v in ipairs(items) do
       v:wake()
     end
     for _, v in ipairs(items) do
       v:block()
     end
-    print("build complete")
-  end, function (err) return err .. "\n" .. debug.traceback() end)
-  
-  ul.persistence.save(".ursa.cache", {serial_v, built_signatures, built_tokens})
-  
-  local cs = md5_file(".ursa.cache", true)
-  local filcs = io.open(".ursa.cache.checksum", "wb")
-  filcs:write(cs)
-  filcs:close()
-  
-  if not status then
-    print_status(rv)
-    os.exit(1)
   end
+  
+  if outer then
+    local status, rv = xpcall(proc, function (err) return err .. "\n" .. debug.traceback() end)
+    
+    ul.persistence.save(".ursa.cache", {serial_v, built_signatures, built_tokens})
+    
+    local cs = md5_file(".ursa.cache", true)
+    local filcs = io.open(".ursa.cache.checksum", "wb")
+    filcs:write(cs)
+    filcs:close()
+    
+    if not status then
+      print_status(rv)
+      os.exit(1)
+    end
+    
+    in_build = false
+    
+    -- print out that chart
+    local printed = {}
+    local function print_item(item, depth)
+      if tree_static[item] and not tree_modified[item] then return end  -- bzzzzt
+      if not tree_modified[item] then return end
+      
+      if tree_modified[item] then
+        print_status("*", ("  "):rep(depth) .. item)
+      else
+        print_status(" ", ("  "):rep(depth) .. item)
+      end
+      
+      if not printed[item] and tree_tree[item] then
+        printed[item] = true
+        for k in pairs(tree_tree[item]) do
+          print_item(k, depth + 1)
+        end
+      end
+    end
+    print("treeing")
+    for _, v in ipairs(tree_roots) do
+      print("whatwhat tree", v)
+      print_item(v, 0)
+    end
+  else
+    proc()
+  end
+  
+  tree_pop(tid)
 end
 
 -- returns an iterator to list all generated files
