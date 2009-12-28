@@ -682,16 +682,34 @@ function ursa.build(param)
     in_build = false
     
     -- print out that chart
-    if false then
+    if true then
       local printed = {}
-      local function print_item(item, depth)
-        if tree_static[item] and not tree_modified[item] then return end  -- bzzzzt
+      local modified = {}
+      local function recursive_modified(item)
+        if modified[item] ~= nil then return modified[item] end
         
-        if tree_modified[item] then
-          print_status("*", ("  "):rep(depth) .. item)
+        local md = tree_modified[item]
+        if not md and tree_tree[item] then for k in pairs(tree_tree[item]) do
+          if recursive_modified(k) then
+            md = true
+            break
+          end
+        end end
+        
+        modified[item] = md
+        return md
+      end
+      local function print_item(item, depth)
+        if not recursive_modified(item) then return end
+        
+        local pref, suff = "", ""
+        if tree_modified[item] and not printed[item] then
+          pref, suff = "\027[31m\027[1m", "\027[0m"
+        elseif tree_modified[item] then
+          pref, suff = "\027[31m", "\027[0m"
         else
-          print_status(" ", ("  "):rep(depth) .. item)
         end
+        print_status(pref .. ("  "):rep(depth) .. item .. suff)
         
         if not printed[item] and tree_tree[item] then
           printed[item] = true
