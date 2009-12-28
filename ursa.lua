@@ -228,8 +228,7 @@ local function relativize(orig, newhead)
   return orig
 end
 
-local function make_standard_path(item)
-  -- get rid of various relative paths
+local function strip_relative_path(item)
   local new_item = item
   while true do
     local itex = new_item:gsub("[%w_]+/%.%./", "")
@@ -238,8 +237,11 @@ local function make_standard_path(item)
   end
   assert(not new_item:find("/%.%./"), "Path appears to be relative: " .. item .. " (converted to " .. new_item .. ")")
   assert(not new_item:find("/%./"), "Path appears to be relative: " .. item .. " (converted to " .. new_item .. ")")
-  item = new_item
-  
+  return new_item
+end
+
+local function make_standard_path(item)
+  -- get rid of various relative paths
   local prefix = item:sub(1, 1)
   if prefix == "#" then
     local block = item:sub(2)
@@ -249,15 +251,15 @@ local function make_standard_path(item)
       return '#' .. context_stack_prefix() .. block -- relative injection
     end
   elseif prefix == "!" then
-    return prefix -- literal
+    return item -- literal
   elseif prefix == "@" then
-    return item:sub(2) -- absolute path, strip off the prefix
+    return strip_relative_path(item:sub(2)) -- absolute path, strip off the prefix
   elseif prefix == ":" then
     assert(false) -- not supported
   elseif prefix == "." then
     assert(false) -- relative paths are evil
   else
-    return context_stack_prefix() .. item
+    return strip_relative_path(context_stack_prefix() .. item)
   end
 end
 local function make_absolute_from_core(path)
@@ -266,7 +268,7 @@ local function make_absolute_from_core(path)
     return "#@" .. path:sub(2)
   elseif prefix == "!" then
     assert(false)
-    return prefix -- literal
+    return item -- literal
   elseif prefix == "@" then
     assert(false) -- what
   elseif prefix == ":" then
@@ -529,6 +531,11 @@ function ursa.rule(param)
   local destination, dependencies, activity = unpack(param)
   --print("Making rule:", destination, dependencies, activity)
   
+  if type(activity) == "table" then
+    dependencies = {dependencies, activity.depends}
+    activity = activity.run
+  end
+  
   local ofilelist = {}
   local ofileabs = {}
   
@@ -567,6 +574,11 @@ end
 function ursa.token_rule(param)
   local destination, dependencies, activity = unpack(param)
   --print("Making token:", destination, dependencies, activity)
+  
+  if type(activity) == "table" then
+    dependencies = {dependencies, activity.depends}
+    activity = activity.run
+  end
   
   distill_dependencies(dependencies, nil, false)
   
@@ -670,28 +682,27 @@ function ursa.build(param)
     in_build = false
     
     -- print out that chart
-    local printed = {}
-    local function print_item(item, depth)
-      if tree_static[item] and not tree_modified[item] then return end  -- bzzzzt
-      if not tree_modified[item] then return end
-      
-      if tree_modified[item] then
-        print_status("*", ("  "):rep(depth) .. item)
-      else
-        print_status(" ", ("  "):rep(depth) .. item)
-      end
-      
-      if not printed[item] and tree_tree[item] then
-        printed[item] = true
-        for k in pairs(tree_tree[item]) do
-          print_item(k, depth + 1)
+    if false then
+      local printed = {}
+      local function print_item(item, depth)
+        if tree_static[item] and not tree_modified[item] then return end  -- bzzzzt
+        
+        if tree_modified[item] then
+          print_status("*", ("  "):rep(depth) .. item)
+        else
+          print_status(" ", ("  "):rep(depth) .. item)
+        end
+        
+        if not printed[item] and tree_tree[item] then
+          printed[item] = true
+          for k in pairs(tree_tree[item]) do
+            print_item(k, depth + 1)
+          end
         end
       end
-    end
-    print("treeing")
-    for _, v in ipairs(tree_roots) do
-      print("whatwhat tree", v)
-      print_item(v, 0)
+      for _, v in ipairs(tree_roots) do
+        print_item(v, 0)
+      end
     end
   else
     proc()

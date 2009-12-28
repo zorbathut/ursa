@@ -36,7 +36,7 @@ end
 
 function ursa.util.system_template(st)
   local str = unpack(st)
-  return function(dests, deps)
+  return {run = function(dests, deps)
     if str:find("$TARGET") and not str:find("$TARGETS") then assert(#dests == 1) end
     if str:find("$SOURCE") and not str:find("$SOURCES") then assert(#deps == 1) end
     
@@ -55,7 +55,7 @@ function ursa.util.system_template(st)
     str = str:gsub("#([%w_]+)", function (param) return ursa.token{param} end)
     
     return ursa.util.system{str}
-  end
+  end, depends = "!" .. str}
 end
 
 function ursa.util.once(st)
