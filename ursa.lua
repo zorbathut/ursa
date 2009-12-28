@@ -9,9 +9,7 @@
 
 ]]
 
-print("req md5 wat")
 require "md5"
-print("hoohah")
 
 require "ursalibc"
 require "ursaliblua"
@@ -491,7 +489,7 @@ end
 
 function ursa.rule(param)
   local destination, dependencies, activity = unpack(param)
-  print("Making rule:", destination, dependencies, activity)
+  --print("Making rule:", destination, dependencies, activity)
   
   local ofilelist = {}
   local ofileabs = {}
@@ -530,7 +528,7 @@ end
 
 function ursa.token_rule(param)
   local destination, dependencies, activity = unpack(param)
-  print("Making token:", destination, dependencies, activity)
+  --print("Making token:", destination, dependencies, activity)
   
   distill_dependencies(dependencies, nil, false)
   
@@ -574,7 +572,7 @@ local command_default = {} -- opaque unique token
 function ursa.command(param)
   local destination, dependencies, activity = unpack(param)
   
-  print("Making command:", destination, dependencies, activity)
+  --print("Making command:", destination, dependencies, activity)
   
   distill_dependencies(dependencies, nil, false)
   
@@ -585,30 +583,27 @@ function ursa.command(param)
 end
 
 function ursa.build(param)
---print("sb")
   if #param == 0 then
     param = {command_default}
   end
   
+  local items = {}
+  for _, v in ipairs(param) do
+    local ite = commands[v] or files[v]
+    assert(ite, v)
+    table.insert(items, ite)
+  end
+  
   local status, rv = xpcall(function ()
-    --print("ip")
-    for _, v in ipairs(param) do
-      assert(commands[v], v)
-      --print("wakein")
-      commands[v]:wake()
-      --print("wakeout")
+    for _, v in ipairs(items) do
+      v:wake()
     end
-    for _, v in ipairs(param) do
-      assert(commands[v])
-      --print("blockin")
-      commands[v]:block()
-      --print("blockout")
+    for _, v in ipairs(items) do
+      v:block()
     end
-    --print("ip done")
     print("build complete")
   end, function (err) return err .. "\n" .. debug.traceback() end)
   
-  --print("sav")
   ul.persistence.save(".ursa.cache", {serial_v, built_signatures, built_tokens})
   
   local cs = md5_file(".ursa.cache", true)
@@ -648,7 +643,7 @@ function ursa.embed(dat)
   local absolute = context_stack_chdir(function () ul.chdir(path) return ul.getcwd() end)
   local prefix = context_stack_prefix() .. path
   
-  print("Embedding:", path, file, prefix, absolute)
+  --print("Embedding:", path, file, prefix, absolute)
   
   local uc, ub, ul, utc = ursa.command, ursa.build, ursa.list
   ursa.command = setmetatable({default = command_default}, {__call = function () end})
@@ -664,7 +659,7 @@ function ursa.embed(dat)
   end))
   context_stack_pop()
   ursa.command, ursa.build, ursa.list = uc, ub, ul
-  print("Ending embed")
+  --print("Ending embed")
   
   return return_unpack(rv)
 end
