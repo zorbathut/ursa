@@ -36,6 +36,14 @@ end
 
 function ursa.util.system_template(st)
   local str = unpack(st)
+  
+  local tokz = {}
+  
+  for tok in str:gmatch("(#[%w_]+)") do
+    table.insert(tokz, tok)
+  end
+  if #tokz == 0 then tokz = nil end
+  
   return {run = function(dests, deps)
     if str:find("$TARGET") and not str:find("$TARGETS") then assert(#dests == 1) end
     if str:find("$SOURCE") and not str:find("$SOURCES") then assert(#deps == 1) end
@@ -55,7 +63,7 @@ function ursa.util.system_template(st)
     str = str:gsub("#([%w_]+)", function (param) return ursa.token{param} end)
     
     return ursa.util.system{str}
-  end, depends = "!" .. str}
+  end, depends = "!" .. str, tokz}
 end
 
 function ursa.util.once(st)

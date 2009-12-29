@@ -14,6 +14,7 @@ local tree_stack = {}
 local tree_roots = {}
 local tree_static = {}
 local tree_modified = {}
+local tree_modified_forced = {}
 
 local function tree_push(item)
   if #tree_stack == 0 then table.insert(tree_roots, item) end
@@ -239,7 +240,6 @@ local function strip_relative_path(item)
   assert(not new_item:find("/%./"), "Path appears to be relative: " .. item .. " (converted to " .. new_item .. ")")
   return new_item
 end
-
 local function make_standard_path(item)
   -- get rid of various relative paths
   local prefix = item:sub(1, 1)
@@ -393,6 +393,9 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       --print("PRESIG", sig, self:signature(), built_signatures[sig])
       if flags.always_rebuild or self:signature() ~= built_signatures[sig] then
         tree_modified[sig] = true
+        if self:signature() == built_signatures[sig] then
+          tree_modified_forced[sig] = true
+        end
         self.sig = nil
         
         local simpledeps = {}
@@ -703,13 +706,26 @@ function ursa.build(param)
         if not recursive_modified(item) then return end
         
         local pref, suff = "", ""
-        if tree_modified[item] and not printed[item] then
-          pref, suff = "\027[31m\027[1m", "\027[0m"
-        elseif tree_modified[item] then
-          pref, suff = "\027[31m", "\027[0m"
-        elseif printed[item] then
-          pref, suff = "\027[30m\027[1m", "\027[0m"
+        if tree_modified[item] then
+          if tree_modified_forced[item] then
+            if not printed[item] then
+              pref, suff = "\027[35m\027[1m", "\027[0m"
+            else
+              pref, suff = "\027[35m", "\027[0m"
+            end
+          else
+            if not printed[item] then
+              pref, suff = "\027[31m\027[1m", "\027[0m"
+            else
+              pref, suff = "\027[31m", "\027[0m"
+            end
+          end
+        else
+          if printed[item] then
+            pref, suff = "\027[30m\027[1m", "\027[0m"
+          end
         end
+        
         print_status(pref .. ("  "):rep(depth) .. item .. suff)
         
         if not printed[item] and tree_tree[item] then
@@ -775,6 +791,54 @@ function ursa.embed(dat)
   --print("Ending embed")
   
   return return_unpack(rv)
+end
+
+local function recurse(item, writ)
+  for _, v in ipairs(item) do
+    if type(v) == "string" then
+      table.insert(writ, v)
+    elseif type(v) == "table" then
+      recurse(v, writ)
+    else
+      assert(false)
+    end
+  end
+end
+function ursa.absolute_from(dat)
+  local path = unpack(dat)
+  
+  if type(path) == "table" then
+    local writ = {}
+    recurse(path, writ)
+    
+    for k, v in ipairs(writ) do
+      writ[k] = ursa.absolute_from(v)
+    end
+    
+    return writ
+  elseif type(path) == "string" then
+    return make_absolute_from_core(context_stack_prefix() .. path)
+  else
+    assert(false)
+  end
+end
+function ursa.relative_from(dat)
+  local path = unpack(dat)
+  
+  if type(path) == "table" then
+    local writ = {}
+    recurse(path, writ)
+    
+    for k, v in ipairs(writ) do
+      writ[k] = ursa.relative_from(v)
+    end
+    
+    return writ
+  elseif type(path) == "string" then
+    return relativize(make_standard_path(dat), context_stack_prefix())
+  else
+    assert(false)
+  end
 end
 
 ursa.gen = {ul = ul, print = print, print_status = print_status}
