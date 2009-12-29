@@ -707,7 +707,8 @@ function ursa.build(param)
           pref, suff = "\027[31m\027[1m", "\027[0m"
         elseif tree_modified[item] then
           pref, suff = "\027[31m", "\027[0m"
-        else
+        elseif printed[item] then
+          pref, suff = "\027[30m\027[1m", "\027[0m"
         end
         print_status(pref .. ("  "):rep(depth) .. item .. suff)
         
