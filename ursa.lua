@@ -812,7 +812,7 @@ function ursa.absolute_from(dat)
     recurse(path, writ)
     
     for k, v in ipairs(writ) do
-      writ[k] = ursa.absolute_from(v)
+      writ[k] = ursa.absolute_from{v}
     end
     
     return writ
@@ -830,12 +830,12 @@ function ursa.relative_from(dat)
     recurse(path, writ)
     
     for k, v in ipairs(writ) do
-      writ[k] = ursa.relative_from(v)
+      writ[k] = ursa.relative_from{v}
     end
     
     return writ
   elseif type(path) == "string" then
-    return relativize(make_standard_path(dat), context_stack_prefix())
+    return relativize(make_standard_path(path), context_stack_prefix())
   else
     assert(false)
   end
