@@ -171,7 +171,6 @@ end
 local function make_raw_file(file)
   assert(file:sub(1, 1) ~= "#", "attempted to use undefined token " .. file) -- not a token wannabe
   tree_static[file] = true
-  print("staticed", file)
 
   local Node = {}
   
@@ -621,6 +620,7 @@ function ursa.token(param)
 end
 
 local command_default = {} -- opaque unique token
+local command_default = "(((default build command)))" -- okay it's less unique right now
 
 function ursa.command(param)
   local destination, dependencies, activity = unpack(param)
@@ -830,7 +830,7 @@ function ursa.relative_from(dat)
     recurse(path, writ)
     
     for k, v in ipairs(writ) do
-      writ[k] = ursa.relative_from(v)
+      writ[k] = ursa.relative_from{v}
     end
     
     return writ
