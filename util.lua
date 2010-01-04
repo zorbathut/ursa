@@ -66,18 +66,11 @@ function ursa.util.system_template(st)
   end, depends = "!" .. str, tokz}
 end
 
-function ursa.util.once(st)
-  local func = unpack(st)
-  local touched = false
-  local rv
-  return function(...)
-    if not touched then
-      rv = func(...)
-      touched = true
-    end
-    
-    return rv
-  end
-end
+local params = {
+  system = {1},
+  token_deferred = {1, default = true},
+  system_template = {1},
+  clean = {0}, -- I'm actually not sure how this even works
+}
 
-ursa.gen.wrap_funcs(ursa.util)
+ursa.gen.wrap_funcs(ursa.util, params)

@@ -474,40 +474,31 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       table.insert(sch, md5.sum(ul.persistence.dump(built_tokens[tokit])))
     else
       for k in pairs(destfiles) do
-        --print(sig, "dfsig", sig_file(k))
         table.insert(sch, sig_file(k))
       end
     end
-    --print("ts b")
+    
     if activity == nil then
-      --print("ts c")
       table.insert(sch, md5.sum(""))  -- "" is pretty much equivalent
-      --print("ts d")
     elseif type(activity) == "string" then
-      --print("ts e")
       table.insert(sch, md5.sum(activity))
-      --print("ts f")
     elseif type(activity) == "function" then
-      --print("ts g")
       table.insert(sch, md5.sum(string.dump(activity)))
-      --print("ts h")
     else
       assert(false)
     end
-    --print("ts i")
+    
     local deps, literals = distill_dependencies(dependencies, destfiles, true)
+    
     for k in pairs(deps) do
-      --print(sig, "depsig", k, files[k]:signature())
       table.insert(sch, files[k]:signature())
     end
     for k in pairs(literals) do
       table.insert(sch, k)
     end
-    --print("ts l")
+    
     table.sort(sch) -- heh heh. our table iteration has no guaranteed order, so we do this to guarantee an order. wheeee. technically this is slightly fragile and we should be doing this only in each "group", but, well, right now we're not.
-    --print("ts m")
     self.sig = md5.sum(table.concat(sch, "\0"))
-    --print("ts n")
     
     return self.sig
   end
@@ -843,18 +834,39 @@ end
 
 ursa.gen = {ul = ul, print = print, print_status = print_status}
 
-function ursa.gen.wrap_funcs(chunk)
+local params = {
+  rule = {3},
+  token = {1, default = true},
+  token_rule = {3, always_rebuild = true},
+  command = {3},
+  build = {1e10}, -- technically infinite
+  embed = {2},
+  absolute_from = {1},
+  relative_from = {1},
+}
+
+function ursa.gen.wrap_funcs(chunk, params)
+  assert(chunk)
+  assert(params)
   for k, v in pairs(chunk) do
     if type(v) == "function" then
+      assert(params[k], "Missing function parameter data for " .. k)
+      local templ = params[k]
       ursa[k] = function (block, ...)
         assert(select('#', ...) == 0)
         assert(type(block) == "table")
+        assert(table.maxn(block) <= templ[1], string.format("%d parameters for call %s (maximum is %d)", table.maxn(block), k, templ[1]))
+        for tk in pairs(block) do
+          if type(tk) ~= "number" then
+            assert(templ[tk], "Unknown parameter " .. tk .. " in function " .. k)
+          end
+        end
         return v(block)
       end
     end
   end
 end
-ursa.gen.wrap_funcs(ursa)
+ursa.gen.wrap_funcs(ursa, params)
 
 local uc = ursa.command
 ursa.command = setmetatable({
