@@ -7,7 +7,7 @@ function ursa.util.system(tex)
   --print("us in")
   local str, rv = ul.system(chunk)
   --print("us out")
-  assert(rv == 0)
+  assert(rv == 0, "Execution failed")
   str = str:match("^%s*(.-)%s*$")
   assert(str)
   return str
@@ -56,14 +56,16 @@ function ursa.util.system_template(st)
     end
     
     local stpass = str
+    --print(str)
     str = str:gsub("$TARGETS", ursa.FRAGILE.parenthesize(dests))
     str = str:gsub("$TARGET", ursa.FRAGILE.parenthesize(dests and dests[1]))
     str = str:gsub("$SOURCES", ursa.FRAGILE.parenthesize(outdeps))
     str = str:gsub("$SOURCE", ursa.FRAGILE.parenthesize(deps and deps[1]))
+    --print(str)
     str = str:gsub("#([%w_]+)", function (param) return ursa.token{param} end)
     
     return ursa.util.system{str}
-  end, depends = "!" .. str, tokz}
+  end, depends = {"!" .. str, tokz}}
 end
 
 local params = {

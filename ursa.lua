@@ -399,7 +399,9 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         
         local simpledeps = {}
         for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
-          table.insert(simpledeps, relativize(k, context_stack_prefix())) -- grr
+          if k:sub(1, 1) ~= "#" then
+            table.insert(simpledeps, relativize(k, context_stack_prefix())) -- grr
+          end
         end
       
         if not flags.token then
@@ -596,7 +598,7 @@ function ursa.token(param)
   tok = make_standard_path("#" .. tok)
   local tokp = tok:sub(2)
   
-  assert(files[tok])
+  assert(files[tok], "Tried to resolve undefined token " .. tok)
   
   if param.default then
     if not built_tokens[tokp] then
