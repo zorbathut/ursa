@@ -14,6 +14,8 @@ function ursa.util.system(tex)
 end
 
 function ursa.util.token_deferred(chunk)
+  assert(chunk[1])
+  
   local func = function () return ursa.token(chunk) end
   if chunk.default then
     return func
