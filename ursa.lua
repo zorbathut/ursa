@@ -291,7 +291,7 @@ local function recrunch(list, item, resolve_functions)
     for _, v in pairs(item) do
       ipct = ipct - 1
     end
-    assert(ipct == 0)
+    assert(ipct == 0, "Non-integer keys found in dependency table")
   elseif type(item) == "function" then
     if resolve_functions then
       recrunch(list, context_stack_chdir(item), resolve_functions)
@@ -632,6 +632,8 @@ local in_build = false
 local build_id = 1
 function ursa.build(param)
   local outer = not in_build
+  local context = context_stack_get()
+  
   local tid = "(build " .. build_id .. " {" .. tostring(param[1]) .. "})"
   build_id = build_id + 1
   tree_push(tid)
@@ -662,6 +664,17 @@ function ursa.build(param)
   
   if outer then
     local status, rv = xpcall(proc, function (err) return err .. "\n" .. debug.traceback() end)
+
+    assert(not status or context == context_stack_get())
+    
+    -- gotta return back to the correct context stack, or we might write our ursa files in the wrong place
+    if not status then
+      while context ~= context_stack_get() do
+        context_stack_pop()
+      end
+      
+      ul.chdir(context_stack_get().absolute)
+    end
     
     ul.persistence.save(".ursa.cache", {serial_v, built_signatures, built_tokens})
     
@@ -760,7 +773,7 @@ function ursa.FRAGILE.token_clear(tok)
 end
 
 function ursa.embed(dat)
-  local path, file = unpack(dat)
+  local path, file, params = unpack(dat)
   local context = context_stack_get()
   local absolute = context_stack_chdir(function () ul.chdir(path) return ul.getcwd() end)
   local prefix = context_stack_prefix() .. path
@@ -777,7 +790,7 @@ function ursa.embed(dat)
     if not d then
       error(e)
     end
-    return d()
+    return d(unpack(params or {}))
   end))
   context_stack_pop()
   ursa.command, ursa.build, ursa.list = uc, ub, ul
@@ -842,7 +855,7 @@ local params = {
   token_rule = {3, always_rebuild = true},
   command = {3},
   build = {1e10}, -- technically infinite
-  embed = {2},
+  embed = {3},
   absolute_from = {1},
   relative_from = {1},
 }
