@@ -890,3 +890,13 @@ ursa.token = setmetatable({
 require "ursa.util"
 
 ursa.gen = nil
+
+
+ursa.DEBUG = {}
+function ursa.DEBUG.dbgamount()
+  local ct = 0
+  for _ in pairs(files) do
+    ct = ct + 1
+  end
+  print(ct, "files")
+end
