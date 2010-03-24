@@ -13,14 +13,21 @@ function ursa.util.system(tex)
   return str
 end
 
+-- turns out this is a surprisingly subtle function, though this really, really shouldn't be surprising anyone
 function ursa.util.token_deferred(chunk)
   assert(chunk[1])
   
-  local func = function () return ursa.token(chunk) end
+  local ab = ursa.absolute_from{"#" .. chunk[1]}
+  assert(type(ab) == "string")
+  assert(ab:sub(1, 2) == "#@")
+  
+  local func = function ()
+    return ursa.token{ab}
+  end
   if chunk.default then
     return func
   else
-    return {"#" .. chunk[1], func}
+    return {ab, func}
   end
 end
 

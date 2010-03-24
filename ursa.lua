@@ -177,28 +177,18 @@ end
 
 
 local function make_raw_file(file)
-  assert(file:sub(1, 1) ~= "#", "attempted to use undefined token " .. file) -- not a token wannabe
+  assert(file:sub(1, 1) ~= "#", "attempted to use undeclared token " .. file) -- not a token wannabe
   tree_static[file] = true
 
   local Node = {}
   
-  function Node:wake()
-    --print(#tree_stack, tree_stack[#tree_stack], tree_tree[tree_stack[#tree_stack]], file)
-    tree_tree[tree_stack[#tree_stack]][file] = true
-    
-    --print("rwak a")
+  local function process_node(self)
     if not self.sig then
-      --print("rwak ba")
       context_stack_push(context_stack[1])
-      --print("rwak bb")
       local fil = context_stack_chdir(sig_file, file, true)
-      --print("rwak bc")
       context_stack_pop()
-      --print("rwak c")
       assert(fil ~= "", "Couldn't locate raw file " .. file .. " in context " .. ul.getcwd())
-      --print("rwak d")
       self.sig = md5.sum(md5.sum(file) .. fil)
-      --print("rwak e")
       
       if built_signatures[file] ~= self.sig then
         tree_modified[file] = true
@@ -206,11 +196,19 @@ local function make_raw_file(file)
       
       built_signatures[file] = self.sig
     end
-    --print("rwak f")
   end
-  Node.block = Node.wake
+  
+  function Node:wake()
+    -- we don't want to do this in block mode because the stack isn't sane in block mode
+    tree_tree[tree_stack[#tree_stack]][file] = true
+    
+    process_node(self)
+  end
+  function Node:block()
+    process_node(self)
+  end
   function Node:signature()
-    self:wake()
+    self:block()
     return self.sig
   end
   function Node:rewrite() -- this file is being changed
@@ -435,7 +433,10 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
               assert(false)
             end
           elseif type(activity) == "function" then
+            -- it's possible that we'll discover new unknown dependencies in this arbitrary function, so we make sure the stack is updated properly
+            tree_push(sig)
             context_stack_chdir(activity, simpledests, simpledeps)
+            tree_pop(sig)
           elseif activity == nil then
           else
             assert(false) -- whups
@@ -448,7 +449,10 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
           if type(activity) == "string" then
             built_tokens[tokit] = context_stack_chdir(ursa.util.system, {activity})
           elseif type(activity) == "function" then
+            -- it's possible that we'll discover new unknown dependencies in this arbitrary function, so we make sure the stack is updated properly
+            tree_push(sig)
             built_tokens[tokit] = context_stack_chdir(activity, simpledests, simpledeps)
+            tree_pop(sig)
           else
             assert(false) -- whups
           end
@@ -603,7 +607,8 @@ function ursa.token_rule(param)
 end
 function ursa.token(param)
   local tok = unpack(param)
-  tok = make_standard_path("#" .. tok)
+  if tok:sub(1, 1) ~= "#" then tok = "#" .. tok end
+  tok = make_standard_path(tok)
   local tokp = tok:sub(2)
   
   assert(files[tok], "Tried to resolve undefined token " .. tok)
@@ -613,6 +618,7 @@ function ursa.token(param)
       return param.default
     end
   else
+    files[tok]:wake()
     files[tok]:block()
     assert(built_tokens[tokp], "didn't build " .. tok)
   end
@@ -831,7 +837,12 @@ function ursa.absolute_from(dat)
     
     return writ
   elseif type(path) == "string" then
-    return make_absolute_from_core(context_stack_prefix() .. path)
+    local pref = path:sub(1, 1)
+    if pref == "#" then
+      return make_absolute_from_core("#" .. context_stack_prefix() .. path:sub(2))
+    else
+      return make_absolute_from_core(context_stack_prefix() .. path)
+    end
   else
     assert(false)
   end
@@ -876,8 +887,8 @@ function ursa.gen.wrap_funcs(chunk, params)
       assert(params[k], "Missing function parameter data for " .. k)
       local templ = params[k]
       ursa[k] = function (block, ...)
-        assert(select('#', ...) == 0)
-        assert(type(block) == "table")
+        assert(select('#', ...) == 0, "Positional data for " .. k)
+        assert(type(block) == "table", "Not a table for call to " .. k)
         assert(table.maxn(block) <= templ[1], string.format("%d parameters for call %s (maximum is %d)", table.maxn(block), k, templ[1]))
         for tk in pairs(block) do
           if type(tk) ~= "number" then
