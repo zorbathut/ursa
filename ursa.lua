@@ -368,11 +368,17 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     
     tree_push(sig)
     
+    if self.state == "processing" then
+      print("Circular dependency!", sig)
+      assert(false)
+    end
+    
     if self.state == "asleep" then
-      self.state = "working"
+      self.state = "processing"
       for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
         files[k]:wake()
       end
+      self.state = "working"
       
       -- add self to production queue
       -- maybe not do it if everything downstream is truly finished?
@@ -388,7 +394,14 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       self:wake()
     end
     
+    -- this might need some refinement once we have parallel builds
+    if self.state == "processing" then
+      print("Circular dependency!", sig)
+      assert(false)
+    end
+    
     if self.state == "working" then
+      self.state = "processing"
       for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
         self.sig = nil
         files[k]:block()
@@ -457,7 +470,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
             assert(false) -- whups
           end
           
-          assert(built_tokens[tokit])
+          assert(built_tokens[tokit], "Tried to build token " .. sig .. " but the function returned nil")
         end
       end
       
@@ -618,6 +631,7 @@ function ursa.token(param)
       return param.default
     end
   else
+    -- we call wake() to generate all the proper tree data, then block() to actually generate stuff. not . . . entirely happy about this? figure out better semantics later, wake/block doesn't quite do what I intended
     files[tok]:wake()
     files[tok]:block()
     assert(built_tokens[tokp], "didn't build " .. tok)
@@ -677,7 +691,7 @@ function ursa.build(param)
   end
   
   if outer then
-    local status, rv = xpcall(proc, function (err) return err .. "\n" .. debug.traceback() end)
+    local status, rv = xpcall(proc, function (err) return err .. "\n" .. ul.traceback_full() end)
 
     assert(not status or context == context_stack_get())
     
