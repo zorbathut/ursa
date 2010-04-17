@@ -70,6 +70,8 @@ So, steps to make this work:
 * Change wake to add coroutine, change block to deal properly too, then do the whole process-manager thing
 * Make it parallel
 
+select() shit - use fileno() to make things work maybe
+
 ]]
 
 local tree_tree = {}
