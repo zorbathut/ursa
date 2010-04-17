@@ -9,6 +9,69 @@
 
 ]]
 
+--[[ Thinkin' about parallel builds.
+
+First off, we need some kind of a Parallel Build Manager, I feel. This is just going to be grim otherwise.
+
+Any function that can halt on tree evaluation - ursa.build and ursa.token, I believe - ends up shelling into the parallel build manager to resolve shit. The parallel build manager effectively halts and loops until it's done, and everything from there is done within coroutines so it can be paused.
+
+Meanwhile, ursa.system (do we have ursa.system? we should have a serious ursa.system, I think) will coroutine.yield() with some appropriate check-to-see-if-we're-done token returned. That goes back to the build manager.
+
+Build manager:
+
+* Keep a pool of "ready coroutines"
+* Run a coroutine
+* Coroutine returns either "sleeping" or "running". If it's running, it's counted as taking a slot. If it's sleeping, it's not.
+  * Coroutine does a few complicated things, but if it ends up blocking on something that isn't yet completed, it goes into "sleep" mode and adds itself to that thing's "being-blocked-on" table. Once that thing finishes, it adds its being-blocked-on table back into the build manager's ready coroutine pool.
+* If we're out of coroutine pool, and everything's finished running, then in theory we're done.
+
+Wake/block:
+
+Wake should add itself to the manager pool, which should just immediately start running it. How should this work? Add a coroutine.yield() between wake calls?
+
+"wake" shouldn't block, but should return immediately.
+"block", on the other hand, may block (obviously).
+
+States:
+sleeping (has not yet awoken, not in the build system)
+processing (in the build system, not finished)
+finished (block can return immediately)
+
+How do we deal with circular dependencies?
+
+Coroutine manager has to also deal with the context stack, which is a bit nasty. Make context stack immutable but also chain intelligently
+
+
+function self:wake() do
+  add_block_to_manager()
+end
+
+function self:block() do
+  if state == "
+  for(items) do
+    item:wake()
+    coroutine.yield()
+  end
+
+  for(items) do
+    item:block()
+  end
+
+  if needs_to_be_processed then
+    self:process()
+  end
+end
+
+The goal here is to start processing as early as humanly possible. Anything that's woken may end up doing things even as the rest of the build system is waking up, and that's totally OK.
+
+So, steps to make this work:
+
+* Modify context stack to do chaining so we can take advantage of garbage collection properly
+* Change wake to add coroutine, change block to deal properly too, then do the whole process-manager thing
+* Make it parallel
+
+]]
+
 local tree_tree = {}
 local tree_stack = {}
 local tree_roots = {}
