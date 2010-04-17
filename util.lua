@@ -1,11 +1,11 @@
 
-local ul, print, print_status = ursa.gen.ul, ursa.gen.print, ursa.gen.print_status
+local lib, print, print_status = ursa.gen.lib, ursa.gen.print, ursa.gen.print_status
 
 function ursa.util.system(tex)
   local chunk = unpack(tex)
   print_status(chunk)
   --print("us in")
-  local str, rv = ul.system(chunk)
+  local str, rv = lib.system(chunk)
   --print("us out")
   assert(rv == 0, "Execution failed")
   str = str:match("^%s*(.-)%s*$")
@@ -103,7 +103,7 @@ function ursa.util.copy()
     i:close()
     o:close()
     
-    ul.chmod_set(dests[1], ul.chmod_get(deps[1]))
+    lib.chmod_set(dests[1], lib.chmod_get(deps[1]))
   end
   --return ursa.util.system_template{"cp $SOURCE $TARGET"}  -- this may be reimplemented later
 end

@@ -92,14 +92,20 @@ end
 
 require "md5"
 
-require "ursalibc"
-require "ursaliblua"
+ursa = {}
 
-local ul = {}
-for k, v in pairs(ursalibc) do ul[k] = v end
-for k, v in pairs(ursaliblua) do ul[k] = v end
+local lib = {}
+ursa.lib = lib
+require "ursalibc"
+for k, v in pairs(ursalibc) do lib[k] = v end
+require "ursaliblua"
+for k, v in pairs(ursaliblua) do lib[k] = v end
+require "ursalibcontext"
+for k, v in pairs(ursalibcontext) do lib[k] = v end
 ursalibc = nil
 ursaliblua = nil
+ursalibcontext = nil
+ursa.lib = nil
 
 local print_raw = print
 
@@ -125,7 +131,6 @@ end
 local files = {}
 local commands = {}
 
-ursa = {}
 ursa.util = {}
 ursa.FRAGILE = {}
 
@@ -150,51 +155,6 @@ function ursa.FRAGILE.parenthesize(item)
   end
 end
 
--- wish there were a better way to do this
-local function return_pack(...)
-  return {..., n = select('#', ...)}
-end
-local function return_unpack(item)
-  return unpack(item, item.n)
-end
-
--- it may seem like we should be chdir'ing when things are pushed or popped, but we actually live "natively" in the root directory. We only chdir when we need to.
-local context_stack = {{prefix = "", absolute = ul.getcwd()}}
-local function context_stack_push(chunk)
-  --print("pushing stack", chunk.prefix, chunk.absolute)
-  table.insert(context_stack, chunk)
-end
-local function context_stack_pop(chunk)
-  --print("popping stack")
-  assert(context_stack[#context_stack] == chunk)
-  table.remove(context_stack)
-end
-local function context_stack_prefix()
-  if context_stack[#context_stack].prefix == "" then return "" end
-  return context_stack[#context_stack].prefix .. "/"
-end
-local function context_stack_chdir(func, ...)
-  local cops = ul.getcwd()
-  ul.chdir(context_stack[#context_stack].absolute)
-  current_print_prefix = context_stack[#context_stack].prefix
-  --print("CHDIR INTO", context_stack[#context_stack].absolute)
-  local rp = return_pack(func(...))
-  current_print_prefix = ""
-  --print("CHDIR EXIT")
-  ul.chdir(cops)
-  return return_unpack(rp)
-end
-local function context_stack_chdir_native(...)
-  context_stack_push(context_stack[1])
-  local rp = return_pack(context_stack_chdir(...))
-  context_stack_pop(context_stack[1])
-  return return_unpack(rp)
-end
-local function context_stack_get()
-  return context_stack[#context_stack]
-end
-
-
 local function md5_file(filename, hexa)
   local file = io.open(filename, "rb")
   if not file then return "" end
@@ -211,7 +171,7 @@ local function md5_file(filename, hexa)
 end
 
 local function sig_file(filename)
-  return tostring(context_stack_chdir_native(ul.mtime, filename) or math.random())  -- yes yes shut up. at least this way we'll almost certainly break
+  return tostring(lib.context_stack_chdir_native(lib.mtime, filename) or math.random())  -- yes yes shut up. at least this way we'll almost certainly break
 end
 
 
@@ -228,7 +188,7 @@ do
     if md5_file(".ursa.cache", true) == cs then
       local dat = cache:read("*a")
       local pv, bs, bt
-      sv, bs, bt = unpack(ul.persistence.load(dat))
+      sv, bs, bt = unpack(lib.persistence.load(dat))
       if sv == serial_v then
         built_signatures, built_tokens = bs, bt
       end
@@ -250,10 +210,8 @@ local function make_raw_file(file)
   
   local function process_node(self)
     if not self.sig then
-      context_stack_push(context_stack[1])
-      local fil = context_stack_chdir(sig_file, file, true)
-      context_stack_pop(context_stack[1])
-      assert(fil ~= "", "Couldn't locate raw file " .. file .. " in context " .. ul.getcwd())
+      local fil = lib.context_stack_chdir_native(sig_file, file, true)
+      assert(fil ~= "", "Couldn't locate raw file " .. file)
       self.sig = md5.sum(md5.sum(file) .. fil)
       
       if built_signatures[file] ~= self.sig then
@@ -319,7 +277,7 @@ local function make_standard_path(item)
     if block:sub(1, 1) == "@" then
       return '#' .. block:sub(2)
     else
-      return '#' .. context_stack_prefix() .. block -- relative injection
+      return '#' .. lib.context_stack_prefix() .. block -- relative injection
     end
   elseif prefix == "!" then
     return item -- literal
@@ -330,7 +288,7 @@ local function make_standard_path(item)
   elseif prefix == "." then
     assert(false, "Appears to be a relative path: " .. prefix)
   else
-    return strip_relative_path(context_stack_prefix() .. item)
+    return strip_relative_path(lib.context_stack_prefix() .. item)
   end
 end
 local function make_absolute_from_core(path)
@@ -366,7 +324,7 @@ local function recrunch(list, item, resolve_functions)
     assert(ipct == 0, "Non-integer keys found in dependency table")
   elseif type(item) == "function" then
     if resolve_functions then
-      recrunch(list, context_stack_chdir(item), resolve_functions)
+      recrunch(list, lib.context_stack_chdir(item), resolve_functions)
     end
   elseif item == nil then
   else
@@ -412,7 +370,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   for k in pairs(destfiles) do
     if k:sub(1, 1) ~= "#" then
       realfiles[k] = true
-      table.insert(simpledests, relativize(k, context_stack_prefix()))
+      table.insert(simpledests, relativize(k, lib.context_stack_prefix()))
     else
       tokens[k:sub(2)] = true
       tokcount = tokcount + 1
@@ -421,7 +379,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   end
   assert(tokcount < 2)
   
-  Node.context = context_stack_get()
+  Node.context = lib.context_stack_get()
 
   Node.state = "asleep"
   function Node:wake()  -- wake up, I'm gonna need you. get yourself ready to be processed and start crunching
@@ -484,7 +442,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         local simpledeps = {}
         for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
           if k:sub(1, 1) ~= "#" then
-            table.insert(simpledeps, relativize(k, context_stack_prefix())) -- grr
+            table.insert(simpledeps, relativize(k, lib.context_stack_prefix())) -- grr
           end
         end
       
@@ -496,14 +454,14 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
               -- this segment is always based on the absolute root!
               local cmd = "mkdir -p -v " .. ursa.FRAGILE.parenthesize(path)
               print_status(cmd)
-              context_stack_chdir_native(os.execute, cmd)
+              lib.context_stack_chdir_native(os.execute, cmd)
               paths_made[path] = true
             end
           end
           
           --print("Activity on", sig, activity)
           if type(activity) == "string" then
-            local rv = context_stack_chdir(function (line) print_status(line) return os.execute(line) end, activity)
+            local rv = lib.context_stack_chdir(function (line) print_status(line) return os.execute(line) end, activity)
             if rv ~= 0 then
               for k in pairs(destfiles) do
                 os.remove(k)
@@ -514,7 +472,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
           elseif type(activity) == "function" then
             -- it's possible that we'll discover new unknown dependencies in this arbitrary function, so we make sure the stack is updated properly
             tree_push(sig)
-            context_stack_chdir(activity, simpledests, simpledeps)
+            lib.context_stack_chdir(activity, simpledests, simpledeps)
             tree_pop(sig)
           elseif activity == nil then
           else
@@ -526,11 +484,11 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
           built_tokens[tokit] = nil
           
           if type(activity) == "string" then
-            built_tokens[tokit] = context_stack_chdir(ursa.util.system, {activity})
+            built_tokens[tokit] = lib.context_stack_chdir(ursa.util.system, {activity})
           elseif type(activity) == "function" then
             -- it's possible that we'll discover new unknown dependencies in this arbitrary function, so we make sure the stack is updated properly
             tree_push(sig)
-            built_tokens[tokit] = context_stack_chdir(activity, simpledests, simpledeps)
+            built_tokens[tokit] = lib.context_stack_chdir(activity, simpledests, simpledeps)
             tree_pop(sig)
           else
             assert(false) -- whups
@@ -543,7 +501,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       -- make sure all the files were generated
       for k in pairs(destfiles) do
         if k:sub(1, 1) ~= "#" then
-          assert(context_stack_chdir_native(ul.mtime, k), "File " .. k .. " wasn't generated by the given build step.")
+          assert(lib.context_stack_chdir_native(lib.mtime, k), "File " .. k .. " wasn't generated by the given build step.")
           if files[k].rewrite then files[k]:rewrite() end -- they were written to, one presumes.
         end
       end
@@ -564,7 +522,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     
     local sch = {}
     if flags.token then
-      table.insert(sch, md5.sum(ul.persistence.dump(built_tokens[tokit])))
+      table.insert(sch, md5.sum(lib.persistence.dump(built_tokens[tokit])))
     else
       for k in pairs(destfiles) do
         table.insert(sch, sig_file(k))
@@ -598,11 +556,11 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   
   local function wrap(func)
     return function (...)
-      context_stack_push(Node.context)
-      local rv = return_pack(func(...))
-      assert(context_stack_get() == Node.context)
-      context_stack_pop(Node.context)
-      return return_unpack(rv)
+      lib.context_stack_push(Node.context)
+      local rv = lib.return_pack(func(...))
+      assert(lib.context_stack_get() == Node.context)
+      lib.context_stack_pop(Node.context)
+      return lib.return_unpack(rv)
     end
   end
   
@@ -756,13 +714,11 @@ function ursa.build(param)
   end
   
   if outer then
-    local status, rv = xpcall(proc, function (err) return err .. "\n" .. ul.traceback_full() end)
-
-    assert(not status or context == context_stack_get())
+    local status, rv = xpcall(proc, function (err) return err .. "\n" .. lib.traceback_full() end)
     
     -- gotta return back to the correct context stack, or we might write our ursa files in the wrong place
-    context_stack_chdir_native(function ()
-      ul.persistence.save(".ursa.cache", {serial_v, built_signatures, built_tokens})
+    lib.context_stack_chdir_native(function ()
+      lib.persistence.save(".ursa.cache", {serial_v, built_signatures, built_tokens})
       
       local cs = md5_file(".ursa.cache", true)
       local filcs = io.open(".ursa.cache.checksum", "wb")
@@ -861,9 +817,9 @@ end
 
 function ursa.embed(dat)
   local path, file, params = unpack(dat)
-  local context = context_stack_get()
-  local absolute = context_stack_chdir(function () ul.chdir(path) return ul.getcwd() end)
-  local prefix = context_stack_prefix() .. path
+  local context = lib.context_stack_get()
+  local absolute = lib.context_stack_chdir(function () lib.chdir(path) return lib.getcwd() end)
+  local prefix = lib.context_stack_prefix() .. path
   
   --print("Embedding:", path, file, prefix, absolute)
   
@@ -872,19 +828,19 @@ function ursa.embed(dat)
   function ursa.build() end
   function ursa.list() assert(false) end
   local stack = {prefix = prefix, absolute = absolute}
-  context_stack_push(stack)
-  local rv = return_pack(context_stack_chdir(function ()
+  lib.context_stack_push(stack)
+  local rv = lib.return_pack(lib.context_stack_chdir(function ()
     local d, e = loadfile(file)
     if not d then
       error(e)
     end
     return d(unpack(params or {}))
   end))
-  context_stack_pop(stack)
+  lib.context_stack_pop(stack)
   ursa.command, ursa.build, ursa.list = uc, ub, ul
   --print("Ending embed")
   
-  return return_unpack(rv)
+  return lib.return_unpack(rv)
 end
 
 local function recurse(item, writ)
@@ -913,9 +869,9 @@ function ursa.absolute_from(dat)
   elseif type(path) == "string" then
     local pref = path:sub(1, 1)
     if pref == "#" then
-      return make_absolute_from_core("#" .. context_stack_prefix() .. path:sub(2))
+      return make_absolute_from_core("#" .. lib.context_stack_prefix() .. path:sub(2))
     else
-      return make_absolute_from_core(context_stack_prefix() .. path)
+      return make_absolute_from_core(lib.context_stack_prefix() .. path)
     end
   else
     assert(false)
@@ -934,13 +890,13 @@ function ursa.relative_from(dat)
     
     return writ
   elseif type(path) == "string" then
-    return relativize(make_standard_path(path), context_stack_prefix())
+    return relativize(make_standard_path(path), lib.context_stack_prefix())
   else
     assert(false)
   end
 end
 
-ursa.gen = {ul = ul, print = print, print_status = print_status}
+ursa.gen = {lib = lib, print = print, print_status = print_status}
 
 local params = {
   rule = {3},

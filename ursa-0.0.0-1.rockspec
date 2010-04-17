@@ -20,6 +20,7 @@ build = {
     ["ursa.util"] = "util.lua",
     
     ursaliblua = "ursaliblua.lua",
+    ursalibcontext = "ursalibcontext.lua",
     
     ursalibc = "ursalib.c",
   },
