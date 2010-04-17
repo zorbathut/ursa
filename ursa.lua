@@ -642,6 +642,7 @@ function ursa.token_rule(param)
   
   return make_absolute_from_core(spath)
 end
+local ubhackery
 function ursa.token(param)
   local tok = unpack(param)
   if tok:sub(1, 1) ~= "#" then tok = "#" .. tok end
@@ -654,10 +655,12 @@ function ursa.token(param)
     if not built_tokens[tokp] then
       return param.default
     end
-  else
+  elseif not built_tokens[tokp] then
+    -- replaced to make parallel building work better, hopefully
+    ubhackery({tok}, true)
     -- we call wake() to generate all the proper tree data, then block() to actually generate stuff. not . . . entirely happy about this? figure out better semantics later, wake/block doesn't quite do what I intended
-    files[tok]:wake()
-    files[tok]:block()
+    --files[tok]:wake()
+    --files[tok]:block()
     assert(built_tokens[tokp], "didn't build " .. tok)
   end
   
@@ -682,8 +685,8 @@ end
 
 local in_build = false
 local build_id = 1
-function ursa.build(param)
-  local outer = not in_build
+function ursa.build(param, not_outer)
+  local outer = not in_build and not not_outer
   
   local tid = "(build " .. build_id .. " {" .. tostring(param[1]) .. "})"
   build_id = build_id + 1
@@ -794,6 +797,7 @@ function ursa.build(param)
   
   tree_pop(tid)
 end
+ubhackery = ursa.build
 
 -- returns an iterator to list all generated files
 function ursa.FRAGILE.list()
