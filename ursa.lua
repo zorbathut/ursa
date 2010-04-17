@@ -75,22 +75,29 @@ select() shit - use fileno() to make things work maybe
 ]]
 
 local tree_tree = {}
-local tree_stack = {}
+local tree_base = nil
 local tree_roots = {}
 local tree_static = {}
 local tree_modified = {}
 local tree_modified_forced = {}
 
 local function tree_push(item)
-  if #tree_stack == 0 then table.insert(tree_roots, item) end
-  table.insert(tree_stack, item)
+  if not tree_base then table.insert(tree_roots, item) end
+  tree_base = {content = item, up = tree_base}
   if not tree_tree[item] then tree_tree[item] = {} end
 end
 local function tree_pop(item)
-  assert(table.remove(tree_stack) == item)
+  tree_base = tree_base.up
 end
 local function tree_top()
-  return tree_stack[#tree_stack]
+  return tree_base and tree_base.content
+end
+
+function tree_snapshot_get()
+  return tree_base
+end
+function tree_snapshot_put(top)
+  tree_base = top
 end
 
 require "md5"
