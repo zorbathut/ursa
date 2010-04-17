@@ -89,6 +89,9 @@ end
 local function tree_pop(item)
   assert(table.remove(tree_stack) == item)
 end
+local function tree_top()
+  return tree_stack[#tree_stack]
+end
 
 require "md5"
 
@@ -224,7 +227,7 @@ local function make_raw_file(file)
   
   function Node:wake()
     -- we don't want to do this in block mode because the stack isn't sane in block mode
-    tree_tree[tree_stack[#tree_stack]][file] = true
+    tree_tree[tree_top()][file] = true
     
     process_node(self)
   end
@@ -383,10 +386,9 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
 
   Node.state = "asleep"
   function Node:wake()  -- wake up, I'm gonna need you. get yourself ready to be processed and start crunching
-    if tree_stack[#tree_stack] then
-      --print(#tree_stack, tree_stack[#tree_stack], tree_tree[tree_stack[#tree_stack]], sig)
-      assert(tree_tree[tree_stack[#tree_stack]])
-      tree_tree[tree_stack[#tree_stack]][sig] = true
+    if tree_top() then
+      assert(tree_tree[tree_top()])
+      tree_tree[tree_top()][sig] = true
     end
     if not tree_tree[sig] then tree_tree[sig] = {} end
     
