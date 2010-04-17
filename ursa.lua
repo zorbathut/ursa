@@ -164,8 +164,9 @@ local function context_stack_push(chunk)
   --print("pushing stack", chunk.prefix, chunk.absolute)
   table.insert(context_stack, chunk)
 end
-local function context_stack_pop()
+local function context_stack_pop(chunk)
   --print("popping stack")
+  assert(context_stack[#context_stack] == chunk)
   table.remove(context_stack)
 end
 local function context_stack_prefix()
@@ -186,7 +187,7 @@ end
 local function context_stack_chdir_native(...)
   context_stack_push(context_stack[1])
   local rp = return_pack(context_stack_chdir(...))
-  context_stack_pop()
+  context_stack_pop(context_stack[1])
   return return_unpack(rp)
 end
 local function context_stack_get()
@@ -251,7 +252,7 @@ local function make_raw_file(file)
     if not self.sig then
       context_stack_push(context_stack[1])
       local fil = context_stack_chdir(sig_file, file, true)
-      context_stack_pop()
+      context_stack_pop(context_stack[1])
       assert(fil ~= "", "Couldn't locate raw file " .. file .. " in context " .. ul.getcwd())
       self.sig = md5.sum(md5.sum(file) .. fil)
       
@@ -600,7 +601,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       context_stack_push(Node.context)
       local rv = return_pack(func(...))
       assert(context_stack_get() == Node.context)
-      context_stack_pop()
+      context_stack_pop(Node.context)
       return return_unpack(rv)
     end
   end
@@ -725,7 +726,6 @@ local in_build = false
 local build_id = 1
 function ursa.build(param)
   local outer = not in_build
-  local context = context_stack_get()
   
   local tid = "(build " .. build_id .. " {" .. tostring(param[1]) .. "})"
   build_id = build_id + 1
@@ -761,20 +761,14 @@ function ursa.build(param)
     assert(not status or context == context_stack_get())
     
     -- gotta return back to the correct context stack, or we might write our ursa files in the wrong place
-    if not status then
-      while context ~= context_stack_get() do
-        context_stack_pop()
-      end
+    context_stack_chdir_native(function ()
+      ul.persistence.save(".ursa.cache", {serial_v, built_signatures, built_tokens})
       
-      ul.chdir(context_stack_get().absolute)
-    end
-    
-    ul.persistence.save(".ursa.cache", {serial_v, built_signatures, built_tokens})
-    
-    local cs = md5_file(".ursa.cache", true)
-    local filcs = io.open(".ursa.cache.checksum", "wb")
-    filcs:write(cs)
-    filcs:close()
+      local cs = md5_file(".ursa.cache", true)
+      local filcs = io.open(".ursa.cache.checksum", "wb")
+      filcs:write(cs)
+      filcs:close()
+    end)
     
     if not status then
       print_status(rv)
@@ -877,7 +871,8 @@ function ursa.embed(dat)
   ursa.command = setmetatable({default = command_default}, {__call = function () end})
   function ursa.build() end
   function ursa.list() assert(false) end
-  context_stack_push({prefix = prefix, absolute = absolute})
+  local stack = {prefix = prefix, absolute = absolute}
+  context_stack_push(stack)
   local rv = return_pack(context_stack_chdir(function ()
     local d, e = loadfile(file)
     if not d then
@@ -885,7 +880,7 @@ function ursa.embed(dat)
     end
     return d(unpack(params or {}))
   end))
-  context_stack_pop()
+  context_stack_pop(stack)
   ursa.command, ursa.build, ursa.list = uc, ub, ul
   --print("Ending embed")
   
