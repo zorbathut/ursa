@@ -100,6 +100,8 @@ function tree_snapshot_put(top)
   tree_base = top
 end
 
+
+
 require "md5"
 
 ursa = {}
@@ -137,6 +139,74 @@ local function garbaj()
   collectgarbage("collect")
   print("testing garbaj complete")
 end
+
+--[[ ===============================================================
+
+COROUTINE MANAGER MODULE
+
+==================================================================]]
+
+-- The manager has a concept of a "state", which includes mostly opaque data
+--
+
+
+local manager_coroutines = {}
+local manager_current_stack = {}
+
+-- wrap a coro and return its state
+local function manager_wrap(coro, nocoro)
+  assert(coro)
+  if not nocoro then
+    coro = coroutine.wrap(coro)
+  end
+  return {coro = coro, tree = tree_snapshot_get(), context = lib.context_stack_snapshot_get()}
+end
+
+local inside
+local function manager_begin(coro)
+  if not inside then
+    local tree, context = tree_snapshot_get(), lib.context_stack_snapshot_get()
+    inside = true
+    
+    table.insert(manager_coroutines, manager_wrap(coro))
+    
+    -- process the coroutines until they're all done
+    while #manager_coroutines > 0 do
+      local cc = table.remove(manager_coroutines)
+      tree_snapshot_put(cc.tree)
+      lib.context_stack_snapshot_put(cc.context)
+      table.insert(manager_current_stack, cc.coro)
+      cc.coro()
+      assert(table.remove(manager_current_stack) == cc.coro)
+      -- it may or may not have added itself, we're okay with that
+    end
+    
+    inside = false
+    tree_snapshot_put(tree)
+    lib.context_stack_snapshot_put(context)
+  else
+    -- we're already inside the manager, so we're inside a coroutine (probably inside an ursa.token{} invocation.) let's just run our program and be done with ourselves
+    coro()
+  end
+end
+
+-- here's the coroutine adder
+local function manager_add(state)
+  table.insert(manager_coroutines, state)
+end
+
+-- here's how we generate our current state
+local function manager_get_current_state()
+  
+  return manager_wrap(manager_current_stack[#manager_current_stack], true)
+end
+  
+
+--[[ ===============================================================
+
+END COROUTINE MANAGER MODULE
+
+==================================================================]]
 
 local files = {}
 local commands = {}
@@ -217,6 +287,7 @@ local function make_raw_file(file)
   tree_static[file] = true
 
   local Node = {}
+  Node.depended_on = {}
   
   local function process_node(self)
     if not self.sig then
@@ -342,17 +413,21 @@ local function recrunch(list, item, resolve_functions)
   end
 end
 
-local function distill_dependencies(dependencies, ofilelist, resolve_functions)
+local function distill_dependencies(dependencies, ofilelist, resolve_functions, from)
+  assert(from)
+  
   local ifilelist = {}
   local literals = {}
   recrunch(ifilelist, dependencies, resolve_functions)
   for k in pairs(ifilelist) do
     assert(not ofilelist or not ofilelist[k])
-    if not files[k] then
-      if k:sub(1, 1) ~= "!" then
+    if k:sub(1, 1) ~= "!" then
+      literals[k] = true
+    else      
+      if not files[k] then
         files[k] = make_raw_file(k)
       else
-        literals[k] = true
+        files[k].depended_on[from] = true
       end
     end
   end
@@ -371,6 +446,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   --  The signatures of everything I depend on, sorted in alphabetical order: if these change, I have to be updated
   -- We also have to store implicit dependencies for nodes, but these get thrown away if the node gets rebuilt
   local Node = {}
+  Node.depended_on = {}
   
   local realfiles = {}
   local tokens = {}
@@ -392,7 +468,25 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   Node.context = lib.context_stack_get()
 
   Node.state = "asleep"
-  function Node:wake()  -- wake up, I'm gonna need you. get yourself ready to be processed and start crunching
+  
+  -- wake up, I'm gonna need you. get yourself ready to be processed and start crunching at some point in the future
+  function Node:wake()
+    if self.state == "asleep" then
+      -- wakey wakey!
+      manager_add(manager_wrap(function ()
+        self:crunch()
+      end))
+      self.state = "working"
+    elseif self.state == "working" or self.state == "finished" then
+      -- guess it's awake
+    else
+      assert(false)
+    end
+  end
+  
+  function Node:crunch()
+    assert(self.state == "working")
+    
     if tree_top() then
       assert(tree_tree[tree_top()])
       tree_tree[tree_top()][sig] = true
@@ -401,14 +495,9 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     
     tree_push(sig)
     
-    if self.state == "processing" then
-      print("Circular dependency!", sig)
-      assert(false)
-    end
-    
     if self.state == "asleep" then
       self.state = "processing"
-      for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
+      for k in pairs(distill_dependencies(dependencies, destfiles, true, sig)) do
         files[k]:wake()
       end
       self.state = "working"
@@ -417,115 +506,125 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       -- maybe not do it if everything downstream is truly finished?
     end
     
+    for k in pairs(distill_dependencies(dependencies, destfiles, true, sig)) do
+      self.sig = nil
+      files[k]:block()
+    end
+    
+    --print("PRESIG", sig, self:signature(), built_signatures[sig])
+    if flags.always_rebuild or self:signature() ~= built_signatures[sig] then
+      tree_modified[sig] = true
+      if self:signature() == built_signatures[sig] then
+        tree_modified_forced[sig] = true
+      end
+      self.sig = nil
+      
+      local simpledeps = {}
+      for k in pairs(distill_dependencies(dependencies, destfiles, true, sig)) do
+        if k:sub(1, 1) ~= "#" then
+          table.insert(simpledeps, relativize(k, lib.context_stack_prefix())) -- grr
+        end
+      end
+    
+      if not flags.token then
+        for k in pairs(realfiles) do
+          os.remove(k)
+          local path = k:match("(.*)/[^/]+")
+          if path and not paths_made[path] then
+            -- this segment is always based on the absolute root!
+            local cmd = "mkdir -p -v " .. ursa.FRAGILE.parenthesize(path)
+            print_status(cmd)
+            lib.context_stack_chdir_native(os.execute, cmd)
+            paths_made[path] = true
+          end
+        end
+        
+        --print("Activity on", sig, activity)
+        if type(activity) == "string" then
+          local rv = lib.context_stack_chdir(function (line) print_status(line) return os.execute(line) end, activity)
+          if rv ~= 0 then
+            for k in pairs(destfiles) do
+              os.remove(k)
+            end
+            print("Program execution failed")
+            assert(false)
+          end
+        elseif type(activity) == "function" then
+          -- it's possible that we'll discover new unknown dependencies in this arbitrary function, so we make sure the stack is updated properly
+          tree_push(sig)
+          lib.context_stack_chdir(activity, simpledests, simpledeps)
+          tree_pop(sig)
+        elseif activity == nil then
+        else
+          assert(false) -- whups
+        end
+      else
+        -- token
+        assert(tokit)
+        built_tokens[tokit] = nil
+        
+        if type(activity) == "string" then
+          built_tokens[tokit] = lib.context_stack_chdir(ursa.util.system, {activity})
+        elseif type(activity) == "function" then
+          -- it's possible that we'll discover new unknown dependencies in this arbitrary function, so we make sure the stack is updated properly
+          tree_push(sig)
+          built_tokens[tokit] = lib.context_stack_chdir(activity, simpledests, simpledeps)
+          tree_pop(sig)
+        else
+          assert(false) -- whups
+        end
+        
+        assert(built_tokens[tokit], "Tried to build token " .. sig .. " but the function returned nil")
+      end
+    end
+    
+    -- make sure all the files were generated
+    for k in pairs(destfiles) do
+      if k:sub(1, 1) ~= "#" then
+        assert(lib.context_stack_chdir_native(lib.mtime, k), "File " .. k .. " wasn't generated by the given build step.")
+        if files[k].rewrite then files[k]:rewrite() end -- they were written to, one presumes.
+      end
+    end
+    
+    if not flags.no_save then
+      --self.sig = nil
+      --print("POSTSIG", sig, self:signature(), built_signatures[sig])
+      built_signatures[sig] = self:signature()
+    end
+    
     tree_pop(sig)
+    
+    self.state = "finished"
+    
+    if self.to_be_awoken then
+      for _, v in ipairs(self.to_be_awoken) do
+        manager_add(v)
+      end
+    end
+    self.to_be_awoken = nil
+    
+    -- now we return! if we're shelled from something we'll just go back to it, if we weren't then we'll get garbage collected after returning
   end
+  
   function Node:block()  -- please return once you're done and yield/grind until then
     local did_something = false
     --print("blocking on", sig, self.state)
     
     if self.state == "asleep" then
       self:wake()
-    end
-    
-    -- this might need some refinement once we have parallel builds
-    if self.state == "processing" then
-      print("Circular dependency!", sig)
-      assert(false)
+      self:block() -- yes yes this looks pretty silly. but it's actually exactly what we want - it'll loop back around into "working" mode, then dump itself in the wait queue
     end
     
     if self.state == "working" then
-      self.state = "processing"
-      for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
-        self.sig = nil
-        files[k]:block()
-      end
+      if not self.to_be_awoken then self.to_be_awoken = {} end
       
-      --print("PRESIG", sig, self:signature(), built_signatures[sig])
-      if flags.always_rebuild or self:signature() ~= built_signatures[sig] then
-        tree_modified[sig] = true
-        if self:signature() == built_signatures[sig] then
-          tree_modified_forced[sig] = true
-        end
-        self.sig = nil
-        
-        local simpledeps = {}
-        for k in pairs(distill_dependencies(dependencies, destfiles, true)) do
-          if k:sub(1, 1) ~= "#" then
-            table.insert(simpledeps, relativize(k, lib.context_stack_prefix())) -- grr
-          end
-        end
-      
-        if not flags.token then
-          for k in pairs(realfiles) do
-            os.remove(k)
-            local path = k:match("(.*)/[^/]+")
-            if path and not paths_made[path] then
-              -- this segment is always based on the absolute root!
-              local cmd = "mkdir -p -v " .. ursa.FRAGILE.parenthesize(path)
-              print_status(cmd)
-              lib.context_stack_chdir_native(os.execute, cmd)
-              paths_made[path] = true
-            end
-          end
-          
-          --print("Activity on", sig, activity)
-          if type(activity) == "string" then
-            local rv = lib.context_stack_chdir(function (line) print_status(line) return os.execute(line) end, activity)
-            if rv ~= 0 then
-              for k in pairs(destfiles) do
-                os.remove(k)
-              end
-              print("Program execution failed")
-              assert(false)
-            end
-          elseif type(activity) == "function" then
-            -- it's possible that we'll discover new unknown dependencies in this arbitrary function, so we make sure the stack is updated properly
-            tree_push(sig)
-            lib.context_stack_chdir(activity, simpledests, simpledeps)
-            tree_pop(sig)
-          elseif activity == nil then
-          else
-            assert(false) -- whups
-          end
-        else
-          -- token
-          assert(tokit)
-          built_tokens[tokit] = nil
-          
-          if type(activity) == "string" then
-            built_tokens[tokit] = lib.context_stack_chdir(ursa.util.system, {activity})
-          elseif type(activity) == "function" then
-            -- it's possible that we'll discover new unknown dependencies in this arbitrary function, so we make sure the stack is updated properly
-            tree_push(sig)
-            built_tokens[tokit] = lib.context_stack_chdir(activity, simpledests, simpledeps)
-            tree_pop(sig)
-          else
-            assert(false) -- whups
-          end
-          
-          assert(built_tokens[tokit], "Tried to build token " .. sig .. " but the function returned nil")
-        end
-      end
-      
-      -- make sure all the files were generated
-      for k in pairs(destfiles) do
-        if k:sub(1, 1) ~= "#" then
-          assert(lib.context_stack_chdir_native(lib.mtime, k), "File " .. k .. " wasn't generated by the given build step.")
-          if files[k].rewrite then files[k]:rewrite() end -- they were written to, one presumes.
-        end
-      end
-      
-      self.state = "finished"
-      
-      if not flags.no_save then
-        --self.sig = nil
-        --print("POSTSIG", sig, self:signature(), built_signatures[sig])
-        built_signatures[sig] = self:signature()
-      end
+      table.insert(self.to_be_awoken, manager_get_current_state())  -- we'll add this once this node is actually done
+      coroutine.yield() -- snoooooore
     end
     
     assert(self.state == "finished")
   end
+  
   function Node:signature()  -- what is your signature?
     if self.sig then return self.sig end
     
@@ -548,7 +647,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       assert(false)
     end
     
-    local deps, literals = distill_dependencies(dependencies, destfiles, true)
+    local deps, literals = distill_dependencies(dependencies, destfiles, true, sig)
     
     for k in pairs(deps) do
       table.insert(sch, files[k]:signature())
@@ -597,14 +696,20 @@ function ursa.rule(param)
   local found_ofile = false
   for k in pairs(ofilelist) do
     --print("yoop", k)
-    assert(not files[k], "output file " .. k .. " already defined")
+    if files[k] then
+      print("output file " .. k .. " already defined")
+      print("", "static:", files[k].static)
+      print("", "depended on by:")
+      for v in pairs(files[k].depended_on) do
+        print("", "", v)
+      end
+      assert(false)
+    end
     found_ofile = true
     
     table.insert(ofileabs, make_absolute_from_core(k))
   end
   assert(found_ofile, "no output files found?")
-  
-  distill_dependencies(dependencies, ofilelist, false)
   
   if type(destination) ~= "string" then
     local fill = {}
@@ -614,6 +719,8 @@ function ursa.rule(param)
     table.sort(fill)
     destination = "{" .. table.concat(fill, "; ") .. "}"
   end
+  
+  distill_dependencies(dependencies, ofilelist, false, destination) -- we need to run this because we need to resolve the dependencies and ensure that they exist
   
   local node = make_node(destination, ofilelist, dependencies, activity, param)
   for k in pairs(ofilelist) do
@@ -633,9 +740,8 @@ function ursa.token_rule(param)
     activity = activity.run
   end
   
-  distill_dependencies(dependencies, nil, false)
-  
   local spath = make_standard_path("#" .. destination)
+  distill_dependencies(dependencies, nil, false, spath)
   
   local node = make_node(spath, {[spath] = true}, dependencies, activity, setmetatable({token = true}, {__index = param}))
   
@@ -684,7 +790,7 @@ function ursa.command(param)
   
   --print("Making command:", destination, dependencies, activity)
   
-  distill_dependencies(dependencies, nil, false)
+  distill_dependencies(dependencies, nil, false, ":" .. tostring(destination))
   
   assert(not commands[destination])
   
@@ -717,12 +823,17 @@ function ursa.build(param, not_outer)
   end
   
   local function proc()
-    for _, v in ipairs(items) do
-      v:wake()
-    end
-    for _, v in ipairs(items) do
-      v:block()
-    end
+    local done = false
+    manager_begin(function ()
+      for _, v in ipairs(items) do
+        v:wake()
+      end
+      for _, v in ipairs(items) do
+        v:block()
+      end
+      done = true
+    end)
+    assert(done, "We probably have a circular dependency! That is bad, especially since Zorba has no bloody clue how to track this down")
   end
   
   if outer then
