@@ -1,18 +1,6 @@
 
 local lib, print, print_status = ursa.gen.lib, ursa.gen.print, ursa.gen.print_status
 
-function ursa.util.system(tex)
-  local chunk = unpack(tex)
-  print_status(chunk)
-  --print("us in")
-  local str, rv = lib.system(chunk)
-  --print("us out")
-  assert(rv == 0, "Execution failed")
-  str = str:match("^%s*(.-)%s*$")
-  assert(str)
-  return str
-end
-
 -- turns out this is a surprisingly subtle function, though this really, really shouldn't be surprising anyone
 function ursa.util.token_deferred(chunk)
   assert(chunk[1])
@@ -79,7 +67,7 @@ function ursa.util.system_template(st)
     --print(str)
     str = str:gsub("#([%w_]+)", function (param) return ursa.token{param} end)
     
-    return ursa.util.system{str}
+    return ursa.system{str}
   end, depends = {"!" .. str, tokz}}
 end
 
@@ -105,7 +93,7 @@ function ursa.util.copy()
     
     lib.chmod_set(dests[1], lib.chmod_get(deps[1]))
   end
-  --return ursa.util.system_template{"cp $SOURCE $TARGET"}  -- this may be reimplemented later
+  --return ursa.system_template{"cp $SOURCE $TARGET"}  -- this may be reimplemented later
 end
 
 local params = {

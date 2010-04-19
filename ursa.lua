@@ -209,7 +209,42 @@ local function manager_get_current_state()
   
   return manager_wrap(manager_current_stack[#manager_current_stack], true)
 end
+
+
+function ursa.system(tex)
+  local chunk = unpack(tex)
+  print_status(chunk)
+  --print("us in")
+  local str, rv = lib.system(chunk)
+  --print("us out")
+  assert(rv == 0, "Execution failed")
+  str = str:match("^%s*(.-)%s*$")
+  assert(str)
+  return str
+end
+--[[
+-- returns stdout, stderr, error code. currently asserts on failure, also trims whitespace and doesn't actually return stderr
+function ursa.system(tex)
+  local chunk = unpack(tex)
+  print_status(chunk)
+  --print("us in")
   
+  local proc = lib.process_spawn(chunk)
+  
+  local rv = {}
+  while true do
+    local str, eof = lib.process_read(proc)
+    table.insert(rv, str)
+    if eof then break end
+  end
+  
+  local status = lib.process_close(proc)
+  assert(status == 0, "Execution failed")
+  
+  --print((table.concat(rv)), (table.concat(rv):match("^%s*(.-)%s*$")))
+  --print(table.concat(rv):match("^%s*(.-)%s*$"), "", status)
+  return table.concat(rv):match("^%s*(.-)%s*$"), "", status
+end]]
 
 --[[ ===============================================================
 
@@ -430,7 +465,7 @@ local function distill_dependencies(dependencies, ofilelist, resolve_functions, 
   recrunch(ifilelist, dependencies, resolve_functions)
   for k in pairs(ifilelist) do
     assert(not ofilelist or not ofilelist[k])
-    if k:sub(1, 1) ~= "!" then
+    if k:sub(1, 1) == "!" then
       literals[k] = true
     else      
       if not files[k] then
@@ -438,6 +473,7 @@ local function distill_dependencies(dependencies, ofilelist, resolve_functions, 
       else
         files[k].depended_on[from] = true
       end
+      ifilelist[k] = true
     end
   end
   for k in pairs(literals) do
@@ -504,19 +540,16 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     
     tree_push(sig)
     
-    if self.state == "asleep" then
-      self.state = "processing"
-      for k in pairs(distill_dependencies(dependencies, destfiles, true, sig)) do
-        files[k]:wake()
+    for k in pairs(distill_dependencies(dependencies, destfiles, true, sig)) do
+      if not files[k] then
+        print("Can't find", k, "from", sig)
+        assert(false)
       end
-      self.state = "working"
-      
-      -- add self to production queue
-      -- maybe not do it if everything downstream is truly finished?
+      files[k]:wake()
     end
     
     for k in pairs(distill_dependencies(dependencies, destfiles, true, sig)) do
-      self.sig = nil
+      self.sig = nil  -- I forget why this is needed, but I suspect it's important
       files[k]:block()
     end
     
@@ -573,7 +606,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         built_tokens[tokit] = nil
         
         if type(activity) == "string" then
-          built_tokens[tokit] = lib.context_stack_chdir(ursa.util.system, {activity})
+          built_tokens[tokit] = lib.context_stack_chdir(ursa.system, {activity})
         elseif type(activity) == "function" then
           -- it's possible that we'll discover new unknown dependencies in this arbitrary function, so we make sure the stack is updated properly
           tree_push(sig)
@@ -1040,6 +1073,7 @@ local params = {
   embed = {3},
   absolute_from = {1},
   relative_from = {1},
+  system = {1},
 }
 
 function ursa.gen.wrap_funcs(chunk, params)

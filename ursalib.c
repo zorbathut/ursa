@@ -165,7 +165,13 @@ static int ursalib_process_read(lua_State *L) {
   int len;
   
   ud = lua_touserdata(L, 1);
+  if(!ud) {
+    luaL_error(L, "omg no userdata");
+  }
   fil = *(FILE**)ud;
+  if(!fil) {
+    luaL_error(L, "omg no fil");
+  }
   
   //printf("recv\n");
   //len = recv(filno, bufr, sizeof(bufr), 0); // msg_dontwait?

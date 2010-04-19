@@ -162,3 +162,15 @@ function ursaliblua.return_unpack(item)
   return unpack(item, item.n)
 end
 
+
+--[[
+function ursaliblua.return_pack(...)
+  local rpx = {...}
+  rpx.n = select('#', ...)
+  return rpx
+end
+function ursaliblua.return_unpack(item)
+  return unpack(item, 1, item.n)
+end
+]]
+
