@@ -174,7 +174,7 @@ local function manager_wrap(coro, nocoro)
   return {coro = coro, tree = tree_snapshot_get(), context = lib.context_stack_snapshot_get()}
 end
 
-local manager_max_processes = 1
+local manager_max_processes = 6
 
 local function manager_execute(cc)
   assert(cc)
