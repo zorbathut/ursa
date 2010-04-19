@@ -72,6 +72,15 @@ So, steps to make this work:
 
 select() shit - use fileno() to make things work maybe
 
+Alright how should the C API work?
+
+fcntl(sockfd, F_SETFL, O_NONBLOCK);
+
+-- Spawn a new process, return a handle
+-- Given a set of handles, return the set that is ready to read
+-- Given a handle, read a chunk
+-- Given a handle, close it
+
 ]]
 
 local tree_tree = {}

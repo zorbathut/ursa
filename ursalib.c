@@ -4,6 +4,8 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/select.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 static int ursalib_system(lua_State *L) {
@@ -72,6 +74,121 @@ static int ursalib_chmod_set(lua_State *L) {
   const char *st = luaL_checklstring(L, 1, NULL);
   chmod(st, luaL_checkint(L, 2));
   return 0;
+}
+
+// Spawn a new process, return a handle
+static int ursalib_process_spawn(lua_State *L) {
+  FILE *fil;
+  void *dat;
+  int fd;
+  int rv;
+  
+  fil = popen(luaL_checkstring(L, 1), "r");
+  if(!fil) {
+    luaL_error(L, "failure to popen, world collapsing in flames");
+  }
+  
+  dat = lua_newuserdata(L, sizeof(fil));
+  *(FILE**)dat = fil;
+  
+  fd = fileno(fil);
+  if(fd == -1) {
+    luaL_error(L, "failure to get fd, world collapsing in flames");
+  }
+  
+  rv = fcntl(fd, F_SETFL, O_NONBLOCK);
+  if(rv == -1) {
+    luaL_error(L, "failure to set nonblock, world collapsing in flames");
+  }
+  
+  return 1;
+}
+
+// Given a set of handles, return the set that is ready to read
+static int ursalib_process_scan(lua_State *L) {
+  int ct;
+  void *ud;
+  FILE *fil;
+  int filno;
+  int i;
+  int tfd;
+  int mx = 0;
+  fd_set fdset_read;
+  
+  FD_ZERO(&fdset_read);
+  
+  luaL_checktype(L, 1, LUA_TTABLE);
+  
+  ct = lua_objlen(L, 1);
+  for(i = 1; i <= ct; i++) {
+    lua_pushnumber(L, i);
+    lua_pushnumber(L, i);
+    lua_gettable(L, 1);
+    ud = lua_touserdata(L, -1);
+    lua_pop(L, 2);
+    
+    fil = *(FILE**)ud;
+    filno = fileno(fil);
+    FD_SET(filno, &fdset_read);
+    if(filno > mx)
+      mx = filno;
+  }
+  
+  select(mx + 1, &fdset_read, NULL, NULL, NULL);
+  
+  lua_newtable(L);
+  for(i = 1; i <= ct; i++) {
+    lua_pushnumber(L, i);
+    lua_pushnumber(L, i);
+    lua_gettable(L, 1);
+    ud = lua_touserdata(L, -1);
+    
+    fil = *(FILE**)ud;
+    filno = fileno(fil);
+    
+    if(FD_ISSET(filno, &fdset_read)) {
+      lua_settable(L, 2);
+    } else {
+      lua_pop(L, 2);
+    }
+  }
+  
+  return 1;
+}
+
+char bufr[16384];
+
+// Given a handle, read a chunk
+static int ursalib_process_read(lua_State *L) {
+  void *ud;
+  FILE *fil;
+  int len;
+  
+  ud = lua_touserdata(L, 1);
+  fil = *(FILE**)ud;
+  
+  //printf("recv\n");
+  //len = recv(filno, bufr, sizeof(bufr), 0); // msg_dontwait?
+  len = fread(bufr, 1, sizeof(bufr), fil);
+  if(len == -1) {
+    perror("wut wut");
+    luaL_error(L, "omg something went wrong");
+  }
+  //printf("recve %d\n", len);
+  
+  lua_pushlstring(L, bufr, len);
+  lua_pushboolean(L, feof(fil));
+  return 2;
+}
+  
+// Given a handle, close it
+static int ursalib_process_close(lua_State *L) {
+  void *ud;
+  FILE *fil;
+  ud = lua_touserdata(L, -1);
+  fil = *(FILE**)ud;
+  lua_pushinteger(L, pclose(fil));
+  return 1;
 }
 
 #define LEVELS1	10000	/* size of the first part of the stack */
@@ -149,6 +266,11 @@ LUALIB_API int luaopen_ursalibc(lua_State *L)
     {"chmod_get", ursalib_chmod_get},
     {"chmod_set", ursalib_chmod_set},
     {"traceback_full", ursalib_traceback_full},
+    
+    {"process_spawn", ursalib_process_spawn},
+    {"process_scan", ursalib_process_scan},
+    {"process_read", ursalib_process_read},
+    {"process_close", ursalib_process_close},
     {NULL, NULL}
   };
 
