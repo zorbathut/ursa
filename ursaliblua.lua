@@ -154,16 +154,6 @@ persistence =
 ursaliblua.persistence = persistence
 
 
--- wish there were a better way to do this
-function ursaliblua.return_pack(...)
-  return {..., n = select('#', ...)}
-end
-function ursaliblua.return_unpack(item)
-  return unpack(item, item.n)
-end
-
-
---[[
 function ursaliblua.return_pack(...)
   local rpx = {...}
   rpx.n = select('#', ...)
@@ -172,5 +162,3 @@ end
 function ursaliblua.return_unpack(item)
   return unpack(item, 1, item.n)
 end
-]]
-

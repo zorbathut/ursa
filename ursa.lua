@@ -181,6 +181,7 @@ local function manager_begin(coro)
     
     -- process the coroutines until they're all done
     while #manager_coroutines > 0 do
+      print("CORO COUNT:", #manager_coroutines)
       local cc = table.remove(manager_coroutines)
       tree_snapshot_put(cc.tree)
       lib.context_stack_snapshot_put(cc.context)
@@ -210,19 +211,6 @@ local function manager_get_current_state()
   return manager_wrap(manager_current_stack[#manager_current_stack], true)
 end
 
-
-function ursa.system(tex)
-  local chunk = unpack(tex)
-  print_status(chunk)
-  --print("us in")
-  local str, rv = lib.system(chunk)
-  --print("us out")
-  assert(rv == 0, "Execution failed")
-  str = str:match("^%s*(.-)%s*$")
-  assert(str)
-  return str
-end
---[[
 -- returns stdout, stderr, error code. currently asserts on failure, also trims whitespace and doesn't actually return stderr
 function ursa.system(tex)
   local chunk = unpack(tex)
@@ -233,6 +221,7 @@ function ursa.system(tex)
   
   local rv = {}
   while true do
+    lib.process_scan({proc})
     local str, eof = lib.process_read(proc)
     table.insert(rv, str)
     if eof then break end
@@ -244,7 +233,7 @@ function ursa.system(tex)
   --print((table.concat(rv)), (table.concat(rv):match("^%s*(.-)%s*$")))
   --print(table.concat(rv):match("^%s*(.-)%s*$"), "", status)
   return table.concat(rv):match("^%s*(.-)%s*$"), "", status
-end]]
+end
 
 --[[ ===============================================================
 
@@ -734,12 +723,22 @@ function ursa.rule(param)
   local ofileabs = {}
   
   recrunch(ofilelist, destination, true)
+    
+  if type(destination) ~= "string" then
+    local fill = {}
+    for k in pairs(ofilelist) do
+      table.insert(fill, k)
+    end
+    table.sort(fill)
+    destination = "{" .. table.concat(fill, "; ") .. "}"
+  end
   
   local found_ofile = false
   for k in pairs(ofilelist) do
     --print("yoop", k)
     if files[k] then
-      print("output file " .. k .. " already defined")
+      print("error when trying to create", destination)
+      print("", "output file " .. k .. " already defined")
       print("", "static:", files[k].static)
       print("", "depended on by:")
       for v in pairs(files[k].depended_on) do
@@ -752,15 +751,6 @@ function ursa.rule(param)
     table.insert(ofileabs, make_absolute_from_core(k))
   end
   assert(found_ofile, "no output files found?")
-  
-  if type(destination) ~= "string" then
-    local fill = {}
-    for k in pairs(ofilelist) do
-      table.insert(fill, k)
-    end
-    table.sort(fill)
-    destination = "{" .. table.concat(fill, "; ") .. "}"
-  end
   
   distill_dependencies(dependencies, ofilelist, false, destination) -- we need to run this because we need to resolve the dependencies and ensure that they exist
   
