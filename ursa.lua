@@ -162,6 +162,9 @@ COROUTINE MANAGER MODULE
 local manager_coroutines = {}
 local manager_current_stack = {}
 
+local manager_handles = {}
+local manager_live = {}
+
 -- wrap a coro and return its state
 local function manager_wrap(coro, nocoro)
   assert(coro)
@@ -171,27 +174,53 @@ local function manager_wrap(coro, nocoro)
   return {coro = coro, tree = tree_snapshot_get(), context = lib.context_stack_snapshot_get()}
 end
 
-local inside
+local manager_max_processes = 1
+
+local function manager_execute(cc)
+  assert(cc)
+  tree_snapshot_put(cc.tree)
+  lib.context_stack_snapshot_put(cc.context)
+  table.insert(manager_current_stack, cc.coro)
+  cc.coro()
+  assert(table.remove(manager_current_stack) == cc.coro)
+end
+
+local last_status = 0
+
+local manager_inside
 local function manager_begin(coro)
-  if not inside then
+  if not manager_inside then
     local tree, context = tree_snapshot_get(), lib.context_stack_snapshot_get()
-    inside = true
+    manager_inside = true
     
     table.insert(manager_coroutines, manager_wrap(coro))
     
     -- process the coroutines until they're all done
-    while #manager_coroutines > 0 do
-      print("CORO COUNT:", #manager_coroutines)
-      local cc = table.remove(manager_coroutines)
-      tree_snapshot_put(cc.tree)
-      lib.context_stack_snapshot_put(cc.context)
-      table.insert(manager_current_stack, cc.coro)
-      cc.coro()
-      assert(table.remove(manager_current_stack) == cc.coro)
-      -- it may or may not have added itself, we're okay with that
+    while #manager_coroutines > 0 or #manager_handles > 0 do
+      if last_status < os.time() - 5 then
+        last_status = os.time() - 5
+        print("CORO STATUS:", #manager_handles, #manager_coroutines)
+        for _, v in pairs(manager_live) do
+          print("", v.command)
+        end
+      end
+      
+      if #manager_handles < manager_max_processes and #manager_coroutines > 0 then
+        -- if we need to add a new process, then do so
+        manager_execute(table.remove(manager_coroutines))
+        -- it may or may not have added itself, we're okay with that
+      else
+        -- otherwise wait for an existing process to be ready
+        local readies = lib.process_scan(manager_handles)
+        for _, v in ipairs(readies) do
+          manager_execute(manager_live[v])
+          -- again, these might remove themselves from the current handles, we're totally A-OK with that
+        end
+      end
+      -- loop back around until we're done
     end
     
-    inside = false
+    manager_inside = false
     tree_snapshot_put(tree)
     lib.context_stack_snapshot_put(context)
   else
@@ -207,7 +236,6 @@ end
 
 -- here's how we generate our current state
 local function manager_get_current_state()
-  
   return manager_wrap(manager_current_stack[#manager_current_stack], true)
 end
 
@@ -219,13 +247,31 @@ function ursa.system(tex)
   
   local proc = lib.process_spawn(chunk)
   
+  table.insert(manager_handles, proc)
+  
   local rv = {}
   while true do
-    lib.process_scan({proc})
+    if manager_inside then
+      manager_live[proc] = manager_get_current_state()
+      manager_live[proc].command = chunk
+      coroutine.yield()
+    else
+      lib.process_scan({proc})
+    end
     local str, eof = lib.process_read(proc)
     table.insert(rv, str)
     if eof then break end
   end
+  
+  local foundcount = 0
+  for i = 1, #manager_handles do
+    if manager_handles[i] == proc then
+      table.remove(manager_handles, i)
+      foundcount = foundcount + 1
+    end
+  end
+  assert(foundcount == 1)
+  manager_live[proc] = nil
   
   local status = lib.process_close(proc)
   assert(status == 0, "Execution failed")

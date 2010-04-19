@@ -113,6 +113,7 @@ static int ursalib_process_scan(lua_State *L) {
   int i;
   int tfd;
   int mx = 0;
+  int ofs = 1;
   fd_set fdset_read;
   
   FD_ZERO(&fdset_read);
@@ -122,10 +123,9 @@ static int ursalib_process_scan(lua_State *L) {
   ct = lua_objlen(L, 1);
   for(i = 1; i <= ct; i++) {
     lua_pushnumber(L, i);
-    lua_pushnumber(L, i);
     lua_gettable(L, 1);
     ud = lua_touserdata(L, -1);
-    lua_pop(L, 2);
+    lua_pop(L, 1);
     
     fil = *(FILE**)ud;
     filno = fileno(fil);
@@ -137,8 +137,8 @@ static int ursalib_process_scan(lua_State *L) {
   select(mx + 1, &fdset_read, NULL, NULL, NULL);
   
   lua_newtable(L);
+  lua_pushnumber(L, ofs++);
   for(i = 1; i <= ct; i++) {
-    lua_pushnumber(L, i);
     lua_pushnumber(L, i);
     lua_gettable(L, 1);
     ud = lua_touserdata(L, -1);
@@ -148,10 +148,12 @@ static int ursalib_process_scan(lua_State *L) {
     
     if(FD_ISSET(filno, &fdset_read)) {
       lua_settable(L, 2);
+      lua_pushnumber(L, ofs++);
     } else {
-      lua_pop(L, 2);
+      lua_pop(L, 1);
     }
   }
+  lua_pop(L, 1);
   
   return 1;
 }
