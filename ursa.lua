@@ -367,9 +367,11 @@ local function make_raw_file(file)
 
   local Node = {}
   Node.depended_on = {}
+  Node.unused = true
   
   local function process_node(self)
     if not self.sig then
+      self.unused = nil
       local fil = lib.context_stack_chdir_native(sig_file, file, true)
       assert(fil ~= "", "Couldn't locate raw file " .. file)
       self.sig = md5.sum(md5.sum(file) .. fil)
@@ -384,9 +386,8 @@ local function make_raw_file(file)
   
   function Node:wake()
     -- we don't want to do this in block mode because the stack isn't sane in block mode
+    -- 'course this doesn't work at all right now
     tree_tree[tree_top()][file] = true
-    
-    process_node(self)
   end
   function Node:block()
     process_node(self)
@@ -783,14 +784,19 @@ function ursa.rule(param)
   for k in pairs(ofilelist) do
     --print("yoop", k)
     if files[k] then
-      print("error when trying to create", destination)
-      print("", "output file " .. k .. " already defined")
-      print("", "static:", files[k].static)
-      print("", "depended on by:")
-      for v in pairs(files[k].depended_on) do
-        print("", "", v)
+      if files[k].unused then
+        files[k] = nil -- woop
+      else
+        print("error when trying to create", destination)
+        print("", "output file " .. k .. " already defined")
+        print("", "static:", files[k].static)
+        print("", "unused:", files[k].unused)
+        print("", "depended on by:")
+        for v in pairs(files[k].depended_on) do
+          print("", "", v)
+        end
+        assert(false)
       end
-      assert(false)
     end
     found_ofile = true
     
