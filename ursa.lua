@@ -83,6 +83,8 @@ fcntl(sockfd, F_SETFL, O_NONBLOCK);
 
 ]]
 
+local warnings = {}
+
 local tree_tree = {}
 local tree_base = nil
 local tree_roots = {}
@@ -90,16 +92,22 @@ local tree_static = {}
 local tree_modified = {}
 local tree_modified_forced = {}
 
-local function tree_push(item)
+local function tree_push(item, rebuild)
+  if not rebuild then rebuild = false end
   if not tree_base then table.insert(tree_roots, item) end
-  tree_base = {content = item, up = tree_base}
+  tree_base = {content = item, rebuild = rebuild, up = tree_base}
   if not tree_tree[item] then tree_tree[item] = {} end
 end
-local function tree_pop(item)
+local function tree_pop(item, rebuild)
+  if not rebuild then rebuild = false end
+  assert(tree_base.content == item)
+  assert(tree_base.rebuild == rebuild)
   tree_base = tree_base.up
 end
 local function tree_top()
-  return tree_base and tree_base.content
+  local cont, reb = tree_base and tree_base.content, tree_base and tree_base.rebuild
+  if reb == nil then reb = true end
+  return cont, reb
 end
 
 function tree_snapshot_get()
@@ -131,7 +139,9 @@ ursa.lib = nil
 local print_raw = print
 
 local current_print_prefix = ""
+local printed_last = nil
 local function print_status(...)
+  printed_last = nil
   if current_print_prefix ~= "" then
     print(current_print_prefix, ...)
   else
@@ -197,12 +207,13 @@ local function manager_begin(coro)
     
     -- process the coroutines until they're all done
     while #manager_coroutines > 0 or #manager_handles > 0 do
-      if last_status < os.time() - 5 then
+      if last_status < os.time() - 5 and printed_last ~= "corostatus" then
         last_status = os.time() - 5
-        print("\027[30m\027[1mCORO STATUS:", #manager_handles, #manager_coroutines .. "\027[0m")
+        print_status("\027[30m\027[1mCORO STATUS:", #manager_handles, #manager_coroutines .. "\027[0m")
         for _, v in pairs(manager_live) do
-          print("\027[30m\027[1m", v.command .. "\027[0m")
+          print_status("\027[30m\027[1m", v.command .. "\027[0m")
         end
+        printed_last = "corostatus"
       end
       
       if #manager_handles < manager_max_processes and #manager_coroutines > 0 then
@@ -576,7 +587,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     end
     if not tree_tree[sig] then tree_tree[sig] = {} end
     
-    tree_push(sig)
+    tree_push(sig, flags.always_rebuild)
     
     for k in pairs(distill_dependencies(dependencies, destfiles, true, sig)) do
       if not files[k] then
@@ -666,7 +677,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       built_signatures[sig] = self:signature()
     end
 
-    tree_pop(sig)
+    tree_pop(sig, flags.always_rebuild)
     self.state = "finished"
     
     if self.to_be_awoken then
@@ -776,6 +787,11 @@ function ursa.rule(param)
     destination = "{" .. table.concat(fill, "; ") .. "}"
   end
   
+  local _, rebuild = tree_top()
+  if not rebuild then
+    table.insert(warnings, ("INCREDIBLE WARNING: %s created inside %s, but isn't always_rebuild"):format(destination, tostring(tree_top())))
+  end
+  
   local found_ofile = false
   for k in pairs(ofilelist) do
     --print("yoop", k)
@@ -822,6 +838,11 @@ function ursa.token_rule(param)
   
   local spath = make_standard_path("#" .. destination)
   distill_dependencies(dependencies, nil, false, spath)
+  
+  local _, rebuild = tree_top()
+  if not (rebuild or rebuild == nil) then
+    table.insert(warnings, ("INCREDIBLE WARNING: %s created inside %s, but isn't always_rebuild"):format(spath, tostring(tree_top())))
+  end
   
   local node = make_node(spath, {[spath] = true}, dependencies, activity, setmetatable({token = true}, {__index = param}))
   
@@ -885,7 +906,7 @@ function ursa.build(param, not_outer)
   
   local tid = "(build " .. build_id .. " {" .. tostring(param[1]) .. "})"
   build_id = build_id + 1
-  tree_push(tid)
+  tree_push(tid, true)
   
   if outer then
     in_build = true
@@ -990,12 +1011,20 @@ function ursa.build(param, not_outer)
       for _, v in ipairs(tree_roots) do
         print_item(v, 0)
       end
+      
+      if #warnings > 0 then
+        print("")
+        print("WARNINGS:")
+        for _, v in ipairs(warnings) do
+          print("", v)
+        end
+      end
     end
   else
     proc()
   end
   
-  tree_pop(tid)
+  tree_pop(tid, true)
 end
 ubhackery = ursa.build
 
