@@ -199,9 +199,9 @@ local function manager_begin(coro)
     while #manager_coroutines > 0 or #manager_handles > 0 do
       if last_status < os.time() - 5 then
         last_status = os.time() - 5
-        print("CORO STATUS:", #manager_handles, #manager_coroutines)
+        print("\027[30m\027[1mCORO STATUS:", #manager_handles, #manager_coroutines .. "\027[0m")
         for _, v in pairs(manager_live) do
-          print("", v.command)
+          print("\027[30m\027[1m", v.command .. "\027[0m")
         end
       end
       
@@ -446,8 +446,10 @@ local function make_standard_path(item)
     return strip_relative_path(item:sub(2)) -- absolute path, strip off the prefix
   elseif prefix == ":" then
     assert(false) -- not supported
+  elseif prefix == "." and item:sub(1, 2) == "./" then
+    return strip_relative_path(lib.context_stack_prefix() .. item:sub(3)) -- it's okay, we can live with this
   elseif prefix == "." then
-    assert(false, "Appears to be a relative path: " .. prefix)
+    assert(false, "Appears to be a relative path: " .. prefix .. " (original " .. item .. ")")
   else
     return strip_relative_path(lib.context_stack_prefix() .. item)
   end
@@ -720,7 +722,8 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     elseif type(activity) == "string" then
       table.insert(sch, md5.sum(activity))
     elseif type(activity) == "function" then
-      table.insert(sch, md5.sum(string.dump(activity)))
+      --table.insert(sch, md5.sum(string.dump(activity)))
+      -- I really need some kind of a sane solution to this
     else
       assert(false)
     end
