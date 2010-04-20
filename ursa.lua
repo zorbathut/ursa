@@ -630,10 +630,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
             assert(false)
           end
         elseif type(activity) == "function" then
-          -- it's possible that we'll discover new unknown dependencies in this arbitrary function, so we make sure the stack is updated properly
-          tree_push(sig)
           lib.context_stack_chdir(activity, simpledests, simpledeps)
-          tree_pop(sig)
         elseif activity == nil then
         else
           assert(false) -- whups
@@ -646,10 +643,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         if type(activity) == "string" then
           built_tokens[tokit] = lib.context_stack_chdir(ursa.system, {activity})
         elseif type(activity) == "function" then
-          -- it's possible that we'll discover new unknown dependencies in this arbitrary function, so we make sure the stack is updated properly
-          tree_push(sig)
           built_tokens[tokit] = lib.context_stack_chdir(activity, simpledests, simpledeps)
-          tree_pop(sig)
         else
           assert(false) -- whups
         end
@@ -671,9 +665,8 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       --print("POSTSIG", sig, self:signature(), built_signatures[sig])
       built_signatures[sig] = self:signature()
     end
-    
+
     tree_pop(sig)
-    
     self.state = "finished"
     
     if self.to_be_awoken then
