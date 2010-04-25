@@ -83,6 +83,23 @@ fcntl(sockfd, F_SETFL, O_NONBLOCK);
 
 ]]
 
+local print_raw = print
+
+local current_print_prefix = ""
+local printed_last = nil
+local function print_status(...)
+  printed_last = nil
+  if current_print_prefix ~= "" then
+    print(current_print_prefix, ...)
+  else
+    print(...)
+  end
+end
+
+local function print(...)
+  print_raw("ursadbg", ...)
+end
+
 local warnings = {}
 
 local tree_tree = {}
@@ -108,6 +125,13 @@ local function tree_top()
   local cont, reb = tree_base and tree_base.content, tree_base and tree_base.rebuild
   if reb == nil then reb = true end
   return cont, reb
+end
+local function tree_stack_print()
+  local ite = tree_base
+  while ite do
+    print("", "", ite.content)
+    ite = ite.up
+  end
 end
 
 function tree_snapshot_get()
@@ -135,23 +159,6 @@ ursalibc = nil
 ursaliblua = nil
 ursalibcontext = nil
 ursa.lib = nil
-
-local print_raw = print
-
-local current_print_prefix = ""
-local printed_last = nil
-local function print_status(...)
-  printed_last = nil
-  if current_print_prefix ~= "" then
-    print(current_print_prefix, ...)
-  else
-    print(...)
-  end
-end
-
-local function print(...)
-  print_raw("ursadbg", ...)
-end
 
 local function garbaj()
   print("testing garbaj")
@@ -184,7 +191,7 @@ local function manager_wrap(coro, nocoro)
   return {coro = coro, tree = tree_snapshot_get(), context = lib.context_stack_snapshot_get()}
 end
 
-local manager_max_processes = 6
+local manager_max_processes = 1
 
 local function manager_execute(cc)
   assert(cc)
@@ -382,7 +389,6 @@ local function make_raw_file(file)
   
   local function process_node(self)
     if not self.sig then
-      self.unused = nil
       local fil = lib.context_stack_chdir_native(sig_file, file, true)
       assert(fil ~= "", "Couldn't locate raw file " .. file)
       self.sig = md5.sum(md5.sum(file) .. fil)
@@ -402,8 +408,10 @@ local function make_raw_file(file)
   end
   function Node:block()
     process_node(self)
+    return false
   end
   function Node:signature()
+    self.unused = nil -- now we've had side effects somewhere, potentially, and so we cannot be replaced
     self:block()
     return self.sig
   end
@@ -597,9 +605,16 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       files[k]:wake()
     end
     
-    for k in pairs(distill_dependencies(dependencies, destfiles, true, sig)) do
-      self.sig = nil  -- I forget why this is needed, but I suspect it's important
-      files[k]:block()
+    -- in theory, one of our items might change another of our items. this is actually OK as long as the other item hasn't been "used" yet, i.e. hasn't done anything with possible side effects and hasn't had its state inspecting. we loop until nothing has side effects, at which point we have things as stable as they'll ever get, and we freeze the whole shebang.
+    local maybe_changed = true
+    while maybe_changed do
+      maybe_changed = false
+      for k in pairs(distill_dependencies(dependencies, destfiles, true, sig)) do
+        self.sig = nil  -- I forget why this is needed, but I suspect it's important
+        if files[k]:block() then
+          maybe_changed = true
+        end
+      end
     end
     
     --print("PRESIG", sig, self:signature(), built_signatures[sig])
@@ -695,11 +710,13 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     --print("blocking on", sig, self.state)
     
     if self.state == "asleep" then
+      did_something = true
       self:wake()
       self:block() -- yes yes this looks pretty silly. but it's actually exactly what we want - it'll loop back around into "working" mode, then dump itself in the wait queue
     end
     
     if self.state == "working" then
+      did_something = true
       if not self.to_be_awoken then self.to_be_awoken = {} end
       
       table.insert(self.to_be_awoken, manager_get_current_state())  -- we'll add this once this node is actually done
@@ -707,6 +724,8 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     end
     
     assert(self.state == "finished")
+    
+    return did_something
   end
   
   function Node:signature()  -- what is your signature?
@@ -803,6 +822,8 @@ function ursa.rule(param)
         print("", "output file " .. k .. " already defined")
         print("", "static:", files[k].static)
         print("", "unused:", files[k].unused)
+        print("", "current build stack:")
+        tree_stack_print()
         print("", "depended on by:")
         for v in pairs(files[k].depended_on) do
           print("", "", v)
