@@ -191,14 +191,20 @@ local function manager_wrap(coro, nocoro)
   return {coro = coro, tree = tree_snapshot_get(), context = lib.context_stack_snapshot_get()}
 end
 
-local manager_max_processes = 1
+local manager_max_processes = 6
 
 local function manager_execute(cc)
   assert(cc)
   tree_snapshot_put(cc.tree)
   lib.context_stack_snapshot_put(cc.context)
   table.insert(manager_current_stack, cc.coro)
-  cc.coro()
+  local stat, err = pcall(cc.coro)
+  if not stat then
+    print("Error in run:", err)
+    print("", "Current build stack:")
+    tree_stack_print()
+    assert(false)
+  end
   assert(table.remove(manager_current_stack) == cc.coro)
 end
 
@@ -292,7 +298,7 @@ function ursa.system(tex)
   manager_live[proc] = nil
   
   local status = lib.process_close(proc)
-  assert(status == 0, "Execution failed")
+  assert(status == 0, "Execution failed: " .. chunk)
   
   --print((table.concat(rv)), (table.concat(rv):match("^%s*(.-)%s*$")))
   --print(table.concat(rv):match("^%s*(.-)%s*$"), "", status)
@@ -617,7 +623,6 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       end
     end
     
-    --print("PRESIG", sig, self:signature(), built_signatures[sig])
     if flags.always_rebuild or self:signature() ~= built_signatures[sig] then
       tree_modified[sig] = true
       if self:signature() == built_signatures[sig] then
@@ -889,10 +894,8 @@ function ursa.token(param)
   assert(files[tok], "Tried to resolve undefined token " .. tok)
   
   if param.default then
-    if not built_tokens[tokp] then
-      return param.default
-    end
-  elseif not built_tokens[tokp] then
+    return built_tokens[tokp] or param.default
+  else
     -- replaced to make parallel building work better, hopefully
     ubhackery({tok}, true)
     -- we call wake() to generate all the proper tree data, then block() to actually generate stuff. not . . . entirely happy about this? figure out better semantics later, wake/block doesn't quite do what I intended
