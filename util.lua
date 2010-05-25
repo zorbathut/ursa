@@ -81,6 +81,9 @@ function ursa.util.copy()
     local i = io.open(deps[1], "rb")
     local o = io.open(dests[1], "wb")
     
+    assert(i, "Couldn't open input file " .. deps[1])
+    assert(o, "Couldn't open output file " .. dests[1])
+    
     local size = 2^15
     while true do
       local block = i:read(size)
@@ -96,12 +99,54 @@ function ursa.util.copy()
   --return ursa.system_template{"cp $SOURCE $TARGET"}  -- this may be reimplemented later
 end
 
+local param_map = {
+  j = "jobs",
+}
+function ursa.util.cli_parameter_parse(params)
+  local rv = {}
+  for _, v in ipairs(params) do
+    if v:sub(1, 1) == "-" then
+      local param, option
+      if v:sub(2, 2) == "-" then
+        -- long format
+        param, option = v:match("^%-%-(.*)=(.*)$")
+        if not param then
+          param = v:match("^%-%-(.*)$")
+        end
+      else
+        -- short format
+        param, option = v:match("^%-(.)(.*)$")
+        if option == "" then option = nil end
+        
+        print("short format", v, param, option)
+        
+        param = param_map[param]
+      end
+      
+      if param == "paranoid" then
+        if option == "true" or option == "yes" or option == nil then option = true end
+        if option == "false" or option == "no" then option = false end
+      elseif param == "jobs" then
+        option = tonumber(option)
+      end
+      
+      print("CS", param, option)
+      ursa.config_set{param, option}
+    else
+      table.insert(rv, v)
+    end
+  end
+  
+  return rv
+end
+
 local params = {
   system = {1},
   token_deferred = {1, default = true},
   system_template = {1},
   clean = {0}, -- I'm actually not sure how this even works
   copy = {0},
+  cli_parameter_parse = {1e10}, -- technically infinite
 }
 
 ursa.gen.wrap_funcs(ursa.util, params)

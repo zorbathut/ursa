@@ -100,6 +100,7 @@ local function print(...)
   print_raw("ursadbg", ...)
 end
 
+
 local warnings = {}
 
 local tree_tree = {}
@@ -166,6 +167,58 @@ local function garbaj()
   print("testing garbaj complete")
 end
 
+
+--[[ ===============================================================
+
+CONFIGURATION MODULE
+
+==================================================================]]
+
+-- ursa config is relatively simple all things considered
+
+local config = {
+  jobs = 1,
+  paranoid = false,
+}
+
+function ursa.config_set(params)
+  local name, info = unpack(params)
+  print(name, info)
+  assert(config[name] ~= nil)
+  
+  if name == "jobs" then
+    assert(type(info) == "number")
+    assert(info > 0)
+    assert(math.floor(info) == info)
+    
+    config.jobs = info
+    
+    if config.paranoid and config.jobs ~= 1 then
+      config.paranoid = false
+      print("Paranoid mode requires config.jobs == 1, disabling paranoid mode")
+    end
+  elseif name == "paranoid" then
+    assert(type(info) == "boolean")
+    
+    config.paranoid = info
+    
+    if config.paranoid and config.jobs ~= 1 then
+      config.jobs = 1
+      print("Paranoid mode requires config.jobs == 1, reducing jobs to 1")
+    end
+  else
+    assert(false)
+  end
+end
+
+function ursa.config_get(params)
+  local name = unpack(params)
+  assert(config[name] ~= nil)
+  return config[name]
+end
+
+
+
 --[[ ===============================================================
 
 COROUTINE MANAGER MODULE
@@ -190,8 +243,6 @@ local function manager_wrap(coro, nocoro)
   end
   return {coro = coro, tree = tree_snapshot_get(), context = lib.context_stack_snapshot_get()}
 end
-
-local manager_max_processes = 6
 
 local function manager_execute(cc)
   assert(cc)
@@ -229,7 +280,7 @@ local function manager_begin(coro)
         printed_last = "corostatus"
       end
       
-      if #manager_handles < manager_max_processes and #manager_coroutines > 0 then
+      if #manager_handles < config.jobs and #manager_coroutines > 0 then
         -- if we need to add a new process, then do so
         manager_execute(table.remove(manager_coroutines))
         -- it may or may not have added itself, we're okay with that
@@ -1165,6 +1216,9 @@ local params = {
   absolute_from = {1},
   relative_from = {1},
   system = {1},
+  
+  config_set = {2},
+  config_get = {1},
 }
 
 function ursa.gen.wrap_funcs(chunk, params)
@@ -1199,12 +1253,14 @@ ursa.command = setmetatable({
 
 local token_rule = ursa.token_rule
 local token_value = ursa.token
+ursa.token_rule = nil
 
 ursa.token = setmetatable({
   rule = token_rule,
 }, {
   __call = function(_, ...) return token_value(...) end
 })
+
 
 
 require "ursa.util"
