@@ -370,7 +370,7 @@ end
 
 --[[ ===============================================================
 
-END COROUTINE MANAGER MODULE
+SOME BASIC GLOBALS AND SHIT
 
 ==================================================================]]
 
@@ -379,7 +379,6 @@ local commands = {}
 
 ursa.util = {}
 ursa.FRAGILE = {}
-
 
 function ursa.FRAGILE.parenthesize(item)
   if type(item) == "table" then
@@ -416,10 +415,50 @@ local function md5_file(filename, hexa)
   return rv
 end
 
-local function sig_file(filename)
-  return tostring(lib.context_stack_chdir_native(lib.mtime, filename) or math.random())  -- yes yes shut up. at least this way we'll almost certainly break
+local function sig_file(filename, raw)
+  local snap = lib.context_stack_chdir_native(lib.mtime, filename)
+  if raw then
+    return snap
+  else
+    return tostring(snap or math.random())  -- yes yes shut up. at least this way we'll almost certainly break
+  end
 end
 
+
+--[[ ===============================================================
+
+PARANOIA MODULE
+
+==================================================================]]
+
+local paranoia_exclusion = {}
+local paranoia_snapshot = {}
+
+function paranoia_scan(sig, before)
+  local new_snapshot = {}
+  local actually_exists
+  
+  for k in pairs(files) do
+    if not paranoia_exclusion[k] then
+      new_snapshot[k] = sig_file(k, true)
+    end
+  end
+  
+  for k, v in pairs(paranoia_snapshot) do
+    if new_snapshot[k] ~= v then
+      print("Unexpectedly changing file", k, ("%s building"):format(before and "before" or "after"), sig)
+      assert(false)
+    end
+  end
+  
+  paranoia_snapshot = new_snapshot
+end
+
+--[[ ===============================================================
+
+END PARANOIA MODULE
+
+==================================================================]]
 
 local paths_made = {}
 
@@ -713,6 +752,15 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
           end
         end
         
+        if config.paranoid then
+          for k in pairs(realfiles) do
+            assert(not paranoia_exclusion[k])
+            paranoia_exclusion[k] = true
+          end
+          paranoia_scan(sig, true)
+        end
+        
+        -- this is the part that actually does something
         --print("Activity on", sig, activity)
         if type(activity) == "string" then
           local rv = lib.context_stack_chdir(function (line) print_status(line) return os.execute(line) end, activity)
@@ -729,6 +777,15 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         else
           assert(false) -- whups
         end
+        
+        if config.paranoid then
+          for k in pairs(realfiles) do
+            assert(paranoia_exclusion[k])
+            paranoia_exclusion[k] = nil
+          end
+          paranoia_scan(sig, false)
+        end
+        
       else
         -- token
         assert(tokit)
