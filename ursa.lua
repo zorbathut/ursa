@@ -180,6 +180,18 @@ local config = {
   jobs = 1,
   paranoid = false,
 }
+do  -- default parallelization setting
+  local cpuinfo = io.open("/proc/cpuinfo", "r")
+  if cpuinfo then
+    local ci = cpuinfo:read("*a")
+    local cpucount = 0
+    for x in ci:gmatch("processor") do
+      cpucount = cpucount + 1
+    end
+    config.jobs = math.ceil(cpucount * 1.5)
+    cpuinfo:close()
+  end
+end
 
 function ursa.config_set(params)
   local name, info = unpack(params)
