@@ -745,9 +745,21 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
           local path = k:match("(.*)/[^/]+")
           if path and not paths_made[path] then
             -- this segment is always based on the absolute root!
-            local cmd = "mkdir -p -v " .. ursa.FRAGILE.parenthesize(path)
-            print_status(cmd)
-            lib.context_stack_chdir_native(os.execute, cmd)
+            lib.context_stack_chdir_native(function ()
+              print_status("Creating path", path)
+              local pathstack = ""
+              for item in path:gmatch("([^/]+)") do
+                if pathstack ~= "" then
+                  pathstack = pathstack .. "/"
+                end
+                pathstack = pathstack .. item
+                
+                if not paths_made[pathstack] then
+                  lib.mkdir(pathstack)
+                  paths_made[pathstack] = true
+                end
+              end
+            end)
             paths_made[path] = true
           end
         end

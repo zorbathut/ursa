@@ -52,6 +52,15 @@ static int ursalib_chdir(lua_State *L) {
   return 0;
 }
 
+static int ursalib_mkdir(lua_State *L) {
+  const char *st = luaL_checklstring(L, 1, NULL);
+  if(!st) {
+    luaL_error(L, "mkdir failure, man, I don't know");
+  }
+  mkdir(st, 0755);
+  return 0;
+}
+
 static int ursalib_mtime(lua_State *L) {
   const char *st = luaL_checklstring(L, 1, NULL);
   struct stat stt;
@@ -270,6 +279,7 @@ LUALIB_API int luaopen_ursalibc(lua_State *L)
     {"system", ursalib_system},
     {"getcwd", ursalib_getcwd},
     {"chdir", ursalib_chdir},
+    {"mkdir", ursalib_mkdir},
     {"mtime", ursalib_mtime},
     {"chmod_get", ursalib_chmod_get},
     {"chmod_set", ursalib_chmod_set},
