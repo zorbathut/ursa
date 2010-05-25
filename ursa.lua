@@ -497,7 +497,7 @@ local function make_raw_file(file)
   
   local function process_node(self)
     if not self.sig then
-      local fil = lib.context_stack_chdir_native(sig_file, file, true)
+      local fil = lib.context_stack_chdir_native(sig_file, file)
       assert(fil ~= "", "Couldn't locate raw file " .. file)
       self.sig = md5.sum(md5.sum(file) .. fil)
       
