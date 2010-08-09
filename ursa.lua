@@ -103,6 +103,7 @@ end
 
 local warnings = {}
 
+-- tree_tree[x][y] means "x depends on y"
 local tree_tree = {}
 local tree_base = nil
 local tree_roots = {}
@@ -114,7 +115,6 @@ local function tree_push(item, rebuild)
   if not rebuild then rebuild = false end
   if not tree_base then table.insert(tree_roots, item) end
   tree_base = {content = item, rebuild = rebuild, up = tree_base}
-  if not tree_tree[item] then tree_tree[item] = {} end
 end
 local function tree_pop(item, rebuild)
   if not rebuild then rebuild = false end
@@ -122,6 +122,7 @@ local function tree_pop(item, rebuild)
   assert(tree_base.rebuild == rebuild)
   tree_base = tree_base.up
 end
+-- gets the current thing that's being built
 local function tree_top()
   local cont, reb = tree_base and tree_base.content, tree_base and tree_base.rebuild
   if reb == nil then reb = true end
@@ -132,6 +133,12 @@ local function tree_stack_print()
   while ite do
     print("", "", ite.content)
     ite = ite.up
+  end
+end
+local function tree_add_dependency(x, y, msg)  -- REMEMBER: X requires Y in order to be built!
+  if x and y then
+    if not tree_tree[x] then tree_tree[x] = {} end
+    tree_tree[x][y] = msg or true
   end
 end
 
@@ -247,6 +254,8 @@ local manager_current_stack = {}
 local manager_handles = {}
 local manager_live = {}
 
+local manager_sleeping = {}
+
 -- wrap a coro and return its state
 local function manager_wrap(coro, nocoro)
   assert(coro)
@@ -286,9 +295,14 @@ local function manager_begin(coro)
       if last_status < os.time() - 5 and printed_last ~= "corostatus" then
         last_status = os.time() - 5
         print_status("\027[30m\027[1mCORO STATUS:", #manager_handles, #manager_coroutines .. "\027[0m")
+        print_status("\027[30m\027[1m", "running:")
         for _, v in pairs(manager_live) do
-          print_status("\027[30m\027[1m", v.command .. "\027[0m")
+          print_status("\027[30m\027[1m", "", v.command .. "\027[0m")
         end
+        --[[print_status("\027[30m\027[1m", "sleeping:")
+        for k, v in pairs(manager_sleeping) do
+          print_status("\027[30m\027[1m", "", k, "on", v)
+        end]]
         printed_last = "corostatus"
       end
       
@@ -513,9 +527,9 @@ local function make_raw_file(file)
   function Node:wake()
     -- we don't want to do this in block mode because the stack isn't sane in block mode
     -- 'course this doesn't work at all right now
-    tree_tree[tree_top()][file] = true
   end
   function Node:block()
+    tree_add_dependency(tree_top(), file)
     process_node(self)
     return false
   end
@@ -698,12 +712,6 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   function Node:crunch()
     assert(self.state == "working")
     
-    if tree_top() then
-      assert(tree_tree[tree_top()])
-      tree_tree[tree_top()][sig] = true
-    end
-    if not tree_tree[sig] then tree_tree[sig] = {} end
-    
     tree_push(sig, flags.always_rebuild)
     
     for k in pairs(distill_dependencies(dependencies, destfiles, true, sig)) do
@@ -847,6 +855,8 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
     local did_something = false
     --print("blocking on", sig, self.state)
     
+    tree_add_dependency(tree_top(), sig)
+    
     if self.state == "asleep" then
       did_something = true
       self:wake()
@@ -858,7 +868,9 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       if not self.to_be_awoken then self.to_be_awoken = {} end
       
       table.insert(self.to_be_awoken, manager_get_current_state())  -- we'll add this once this node is actually done
+      manager_sleeping[tree_top()] = sig
       coroutine.yield() -- snoooooore
+      manager_sleeping[tree_top()] = nil
     end
     
     assert(self.state == "finished")
@@ -977,6 +989,7 @@ function ursa.rule(param)
   
   distill_dependencies(dependencies, ofilelist, false, destination) -- we need to run this because we need to resolve the dependencies and ensure that they exist
   
+  tree_add_dependency(destination, tree_top(), "created from")  -- make this a different kind of link somehow, since it's sort of weirdly inverted?
   local node = make_node(destination, ofilelist, dependencies, activity, param)
   for k in pairs(ofilelist) do
     assert(not files[k]) -- we already tried this
@@ -1132,36 +1145,43 @@ function ursa.build(param, not_outer)
         modified[item] = md
         return md
       end
-      local function print_item(item, depth)
+      local function print_item(item, depth, msg)
         if not recursive_modified(item) then return end
         
-        local pref, suff = "", ""
+        local pref, msgc, suff = "", "", ""
         if tree_modified[item] then
           if tree_modified_forced[item] then
             if not printed[item] then
-              pref, suff = "\027[35m\027[1m", "\027[0m"
+              pref, msgc, suff = "\027[35m\027[1m", "\027[0m", "\027[0m"
             else
-              pref, suff = "\027[35m", "\027[0m"
+              pref, msgc, suff = "\027[35m", "\027[30m\027[1m", "\027[0m"
             end
           else
             if not printed[item] then
-              pref, suff = "\027[31m\027[1m", "\027[0m"
+              pref, msgc, suff = "\027[31m\027[1m", "\027[0m", "\027[0m"
             else
-              pref, suff = "\027[31m", "\027[0m"
+              pref, msgc, suff = "\027[31m", "\027[30m\027[1m", "\027[0m"
             end
           end
         else
           if printed[item] then
-            pref, suff = "\027[30m\027[1m", "\027[0m"
+            pref, msgc, suff = "\027[30m\027[1m", "", "\027[0m"
           end
         end
         
-        print_status(pref .. ("  "):rep(depth) .. item .. suff)
+        local ms
+        if msg and msg ~= true then
+          ms = " " .. msgc .. "(" .. msg .. ")"
+        else
+          ms = ""
+        end
+        
+        print_status(pref .. ("  "):rep(depth) .. item .. ms .. suff)
         
         if not printed[item] and tree_tree[item] then
           printed[item] = true
-          for k in pairs(tree_tree[item]) do
-            print_item(k, depth + 1)
+          for k, v in pairs(tree_tree[item]) do
+            print_item(k, depth + 1, v)
           end
         end
       end

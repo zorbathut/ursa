@@ -48,8 +48,8 @@ function ursa.util.system_template(st)
   if #tokz == 0 then tokz = nil end
   
   return {run = function(dests, deps)
-    if str:find("$TARGET") and not str:find("$TARGETS") then assert(#dests == 1) end
-    if str:find("$SOURCE") and not str:find("$SOURCES") then assert(#deps == 1) end
+    if str:find("$TARGET") and not str:find("$TARGETS") then assert(#dests == 1, "Found string $TARGET, but rule has multiple targets") end
+    if str:find("$SOURCE") and not str:find("$SOURCES") then assert(#deps == 1, "Found string $SOURCE, but rule has multiple sources") end
     
     local outdeps = {}
     for _, v in pairs(deps) do
