@@ -1331,7 +1331,7 @@ function ursa.gen.wrap_funcs(chunk, params)
       assert(params[k], "Missing function parameter data for " .. k)
       local templ = params[k]
       ursa[k] = function (block, ...)
-        assert(select('#', ...) == 0, "Positional data for " .. k)
+        assert(select('#', ...) == 0, "Standard argument list detected for " .. k .. " - are you using parenthesis instead of curly braces?")
         assert(type(block) == "table", "Not a table for call to " .. k)
         assert(table.maxn(block) <= templ[1], string.format("%d parameters for call %s (maximum is %d)", table.maxn(block), k, templ[1]))
         for tk in pairs(block) do
