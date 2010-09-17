@@ -589,9 +589,7 @@ local function make_standard_path(item)
   elseif prefix == ":" then
     assert(false) -- not supported
   elseif prefix == "." and item:sub(1, 2) == "./" then
-    return strip_relative_path(lib.context_stack_prefix() .. item:sub(3)) -- it's okay, we can live with this
-  elseif prefix == "." then
-    assert(false, "Appears to be a relative path: " .. prefix .. " (original " .. item .. ")")
+    return make_standard_path(item:sub(3)) -- it's okay, we can live with this
   else
     return strip_relative_path(lib.context_stack_prefix() .. item)
   end
@@ -947,13 +945,21 @@ function ursa.rule(param)
   
   recrunch(ofilelist, destination, true)
     
-  if type(destination) ~= "string" then
+  do
     local fill = {}
     for k in pairs(ofilelist) do
       table.insert(fill, k)
+      assert(k:sub(1, 1) ~= ".")
     end
     table.sort(fill)
-    destination = "{" .. table.concat(fill, "; ") .. "}"
+    
+    if #fill > 1 then
+      destination = "{" .. table.concat(fill, "; ") .. "}"
+    elseif #fill == 1 then
+      destination = fill[1]
+    else
+      assert(false, "No destinations?")
+    end
   end
   
   local _, rebuild = tree_top()
