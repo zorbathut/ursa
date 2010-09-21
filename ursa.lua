@@ -612,9 +612,13 @@ local function make_absolute_from_core(path)
   end
 end
 
-local function recrunch(list, item, resolve_functions)
+local function recrunch(list, item, resolve_functions, use_commands)
   if type(item) == "string" then
-    list[make_standard_path(item)] = true
+    if use_commands and commands[item] then
+      list[item] = item
+    else
+      list[make_standard_path(item)] = true
+    end
   elseif type(item) == "table" then
     local ipct = 0
     for _, v in ipairs(item) do
@@ -815,7 +819,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         elseif type(activity) == "function" then
           built_tokens[tokit] = lib.context_stack_chdir(activity, simpledests, simpledeps)
         else
-          assert(false) -- whups
+          assert(false, "Weird type in token " .. sig .. ": " .. type(activity)) -- whups
         end
         
         assert(built_tokens[tokit], "Tried to build token " .. sig .. " but the function returned nil")
@@ -1000,6 +1004,7 @@ function ursa.rule(param)
   for k in pairs(ofilelist) do
     assert(not files[k]) -- we already tried this
     files[k] = node
+    --print("added", k)
   end
   
   return ofileabs
@@ -1017,6 +1022,10 @@ function ursa.token_rule(param)
   local spath = make_standard_path("#" .. destination)
   distill_dependencies(dependencies, nil, false, spath)
   
+  if type(activity) ~= "function" and type(activity) ~= "string" then
+    assert(false, "Weird type in token " .. spath .. ": " .. type(activity)) -- whups
+  end
+  
   local _, rebuild = tree_top()
   if not (rebuild or rebuild == nil) then
     table.insert(warnings, ("INCREDIBLE WARNING: %s created inside %s, but isn't always_rebuild"):format(spath, tostring(tree_top())))
@@ -1033,6 +1042,7 @@ function ursa.token_rule(param)
   end
   
   files[spath] = node
+  --print("added", spath)
   
   return make_absolute_from_core(spath)
 end
@@ -1049,7 +1059,7 @@ function ursa.token(param)
     return built_tokens[tokp] or param.default
   else
     -- replaced to make parallel building work better, hopefully
-    ubhackery({tok}, true)
+    ubhackery({"#@" .. tokp}, true)
     -- we call wake() to generate all the proper tree data, then block() to actually generate stuff. not . . . entirely happy about this? figure out better semantics later, wake/block doesn't quite do what I intended
     --files[tok]:wake()
     --files[tok]:block()
@@ -1092,10 +1102,13 @@ function ursa.build(param, not_outer)
     param = {command_default}
   end
   
+  local items_stage = {}
+  recrunch(items_stage, param, true, true)
+  
   local items = {}
-  for _, v in ipairs(param) do
-    local ite = commands[v] or files[v]
-    assert(ite, v)
+  for k in pairs(items_stage) do
+    local ite = commands[k] or files[k]
+    assert(ite, k)
     table.insert(items, ite)
   end
   

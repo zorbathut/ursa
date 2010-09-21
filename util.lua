@@ -140,6 +140,12 @@ function ursa.util.cli_parameter_parse(params)
   return rv
 end
 
+local after_count = 0
+function ursa.util.after(params)
+  after_count = after_count + 1
+  return ursa.token.rule{"(ursa.util.after invocation " .. after_count .. ")", nil, function () ursa.build{params} return "" end, always_rebuild = true}
+end
+
 local params = {
   system = {1},
   token_deferred = {1, default = true},
@@ -147,6 +153,7 @@ local params = {
   clean = {0}, -- I'm actually not sure how this even works
   copy = {0},
   cli_parameter_parse = {1e10}, -- technically infinite
+  after = {1e10}, -- technically infinite
 }
 
 ursa.gen.wrap_funcs(ursa.util, params)
