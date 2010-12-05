@@ -340,7 +340,7 @@ local function manager_get_current_state()
   return manager_wrap(manager_current_stack[#manager_current_stack], true)
 end
 
--- returns stdout, stderr, error code. currently asserts on failure, also trims whitespace and doesn't actually return stderr
+-- returns stdout, stderr, error code. currently trims whitespace and doesn't actually return stderr
 function ursa.system(tex)
   local chunk = unpack(tex)
   print_status(chunk)
@@ -375,7 +375,6 @@ function ursa.system(tex)
   manager_live[proc] = nil
   
   local status = lib.process_close(proc)
-  assert(status == 0, "Execution failed: " .. chunk)
   
   --print((table.concat(rv)), (table.concat(rv):match("^%s*(.-)%s*$")))
   --print(table.concat(rv):match("^%s*(.-)%s*$"), "", status)
@@ -786,12 +785,16 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         -- this is the part that actually does something
         --print("Activity on", sig, activity)
         if type(activity) == "string" then
-          local rv = lib.context_stack_chdir(function (line) print_status(line) return os.execute(line) end, activity)
+          local rv = lib.context_stack_chdir(function (line)
+            print_status(line)
+            local stdout, stderr, rv = ursa.system(line)
+            return rv
+          end, {activity})
           if rv ~= 0 then
             for k in pairs(destfiles) do
               os.remove(k)
             end
-            print("Program execution failed")
+            print("Program execution failed: ", activity)
             assert(false)
           end
         elseif type(activity) == "function" then
@@ -815,7 +818,13 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         built_tokens[tokit] = nil
         
         if type(activity) == "string" then
-          built_tokens[tokit] = lib.context_stack_chdir(ursa.system, {activity})
+          local stdout, stderr, rv = lib.context_stack_chdir(ursa.system, {activity})
+          if rv ~= 0 then
+            print("Program execution failed: ", activity)
+            assert(false)
+          else
+            built_tokens[tokit] = stdout
+          end
         elseif type(activity) == "function" then
           built_tokens[tokit] = lib.context_stack_chdir(activity, simpledests, simpledeps)
         else
