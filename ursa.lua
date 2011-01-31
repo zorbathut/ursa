@@ -101,6 +101,10 @@ local function print(...)
 end
 
 
+local nodes_created = 0
+local nodes_inspected = 0
+local nodes_built = 0
+
 local warnings = {}
 
 -- tree_tree[x][y] means "x depends on y"
@@ -501,6 +505,8 @@ end
 
 
 local function make_raw_file(file)
+  nodes_created = nodes_created + 1
+
   assert(file:sub(1, 1) ~= "#", "attempted to use undeclared token " .. file) -- not a token wannabe
   tree_static[file] = true
 
@@ -510,6 +516,8 @@ local function make_raw_file(file)
   
   local function process_node(self)
     if not self.sig then
+      nodes_inspected = nodes_inspected + 1
+      
       local fil = lib.context_stack_chdir_native(sig_file, file)
       assert(fil)
       assert(fil ~= "", "Couldn't locate raw file " .. file)
@@ -664,6 +672,7 @@ local function distill_dependencies(dependencies, ofilelist, resolve_functions, 
 end
 
 local function make_node(sig, destfiles, dependencies, activity, flags)
+  nodes_created = nodes_created + 1
   if not flags then flags = {} end
   -- Node transition: "asleep", "working", "finished".
   -- Signatures are the combined md5 of three separate parts
@@ -699,6 +708,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
   function Node:wake()
     if self.state == "asleep" then
       -- wakey wakey!
+      nodes_inspected = nodes_inspected + 1
       manager_add(manager_wrap(function ()
         self:crunch()
       end))
@@ -783,6 +793,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         end
         
         -- this is the part that actually does something
+        nodes_built = nodes_built + 1
         --print("Activity on", sig, activity)
         if type(activity) == "string" then
           local rv = lib.context_stack_chdir(function (line)
@@ -817,6 +828,7 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
         assert(tokit)
         built_tokens[tokit] = nil
         
+        nodes_built = nodes_built + 1
         if type(activity) == "string" then
           local stdout, stderr, rv = lib.context_stack_chdir(ursa.system, {activity})
           if rv ~= 0 then
@@ -1223,12 +1235,14 @@ function ursa.build(param, not_outer)
       end
       
       if #warnings > 0 then
-        print("")
-        print("WARNINGS:")
+        print_status("")
+        print_status("WARNINGS:")
         for _, v in ipairs(warnings) do
-          print("", v)
+          print_status("", v)
         end
       end
+      
+      print_status(string.format("%d nodes created, %d inspected, %d built", nodes_created, nodes_inspected, nodes_built))
     end
   else
     proc()
