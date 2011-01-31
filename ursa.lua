@@ -1094,6 +1094,7 @@ function ursa.command(param)
   commands[destination] = node
 end
 
+local chart_file
 local in_build = false
 local build_id = 1
 function ursa.build(param, not_outer)
@@ -1157,6 +1158,10 @@ function ursa.build(param, not_outer)
     
     -- print out that chart
     if true then
+      if not chartfile then
+        chartfile = io.open(".ursa.tree", "wb")
+      end
+      
       local printed = {}
       local modified = {}
       local function recursive_modified(item)
@@ -1204,7 +1209,7 @@ function ursa.build(param, not_outer)
           ms = ""
         end
         
-        print_status(pref .. ("  "):rep(depth) .. item .. ms .. suff)
+        chartfile:write(pref .. ("  "):rep(depth) .. item .. ms .. suff)
         
         if not printed[item] and tree_tree[item] then
           printed[item] = true
