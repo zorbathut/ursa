@@ -86,9 +86,9 @@ fcntl(sockfd, F_SETFL, O_NONBLOCK);
 local print_raw = print
 
 local current_print_prefix = ""
-local printed_last = nil
+local suppress_status = false
 local function print_status(...)
-  printed_last = nil
+  suppress_status = false
   if current_print_prefix ~= "" then
     print(current_print_prefix, ...)
   else
@@ -296,25 +296,25 @@ local function manager_begin(coro)
     
     -- process the coroutines until they're all done
     while #manager_coroutines > 0 or #manager_handles > 0 do
-      if last_status < os.time() - 5 and printed_last ~= "corostatus" then
-        last_status = os.time() - 5
-        print_status("\027[30m\027[1mCORO STATUS:", #manager_handles, #manager_coroutines .. "\027[0m")
-        print_status("\027[30m\027[1m", "running:")
-        for _, v in pairs(manager_live) do
-          print_status("\027[30m\027[1m", "", v.command .. "\027[0m")
-        end
-        --[[print_status("\027[30m\027[1m", "sleeping:")
-        for k, v in pairs(manager_sleeping) do
-          print_status("\027[30m\027[1m", "", k, "on", v)
-        end]]
-        printed_last = "corostatus"
-      end
-      
       if #manager_handles < config.jobs and #manager_coroutines > 0 then
         -- if we need to add a new process, then do so
         manager_execute(table.remove(manager_coroutines))
         -- it may or may not have added itself, we're okay with that
       else
+        if last_status < os.time() - 5 and not suppress_status then
+          last_status = os.time()
+          print_status("\027[30m\027[1mCORO STATUS:", #manager_handles, #manager_coroutines .. "\027[0m")
+          print_status("\027[30m\027[1m", "running:")
+          for _, v in pairs(manager_live) do
+            print_status("\027[30m\027[1m", "", v.command .. "\027[0m")
+          end
+          --[[print_status("\027[30m\027[1m", "sleeping:")
+          for k, v in pairs(manager_sleeping) do
+            print_status("\027[30m\027[1m", "", k, "on", v)
+          end]]
+          suppress_status = true
+        end
+        
         -- otherwise wait for an existing process to be ready
         local readies = lib.process_scan(manager_handles)
         for _, v in ipairs(readies) do
@@ -870,6 +870,8 @@ local function make_node(sig, destfiles, dependencies, activity, flags)
       end
     end
     self.to_be_awoken = nil
+    
+    suppress_status = false -- we're done, so we may want to update the display
     
     -- now we return! if we're shelled from something we'll just go back to it, if we weren't then we'll get garbage collected after returning
   end
