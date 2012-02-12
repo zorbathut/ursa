@@ -1132,7 +1132,7 @@ function ursa.build(param, not_outer)
   local items = {}
   for k in pairs(items_stage) do
     local ite = commands[k] or files[k]
-    assert(ite, k)
+    assert(ite, "Rule for creating " .. k .. " not found")
     table.insert(items, ite)
   end
   
@@ -1223,7 +1223,7 @@ function ursa.build(param, not_outer)
           ms = ""
         end
         
-        chartfile:write(pref .. ("  "):rep(depth) .. item .. ms .. suff)
+        chartfile:write(pref .. ("  "):rep(depth) .. item .. ms .. suff .. "\n")
         
         if not printed[item] and tree_tree[item] then
           printed[item] = true
